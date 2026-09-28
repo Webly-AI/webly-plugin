@@ -28,7 +28,8 @@ Webly's MCP tools, with drafts, a quality gate, rollback, custom domains, forms
 and analytics.
 
 `https://api.webly.ai/llms.txt` is the full contract. Read it before building a
-framework (React) site, a CMS, forms or domains, and before telling the person
+framework (React) site, forms or domains, or before changing a site that
+already uses the CMS or a managed blog, and before telling the person
 something is not supported. If this file and the live API disagree, trust the API.
 
 The helper that does every deterministic step is `scripts/webly.mjs` in this
@@ -223,8 +224,11 @@ New sites: `create_website` names the subdomain after the site; if that's taken
 it gets a suffix (`portfolio-x7k2p9`). Pass `subdomain` only when the person asks
 for a specific one (up to 56 characters); a taken one is a `409`, not a variant.
 
-Blog posts go through `add_blog_post`; repeating content (products, team, FAQs)
-goes in collections; forms post with `formAction('name')`, never `mailto:`.
+New content, including blog posts and repeating content (products, team, FAQs),
+goes in the site's source files; don't create collections or blog posts, the CMS
+is deprecated. A site that already reads collections or a managed blog keeps
+using those tools for that content until the owner asks to move it. Forms
+post with `formAction('name')`, never `mailto:`.
 Details are in llms.txt.
 
 `403` names the missing capability in `details.capability`: the grant was
