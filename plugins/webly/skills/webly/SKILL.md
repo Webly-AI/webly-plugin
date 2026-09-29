@@ -27,10 +27,11 @@ person signs in (OAuth over MCP) the site is theirs: permanent, editable through
 Webly's MCP tools, with drafts, a quality gate, rollback, custom domains, forms
 and analytics.
 
-`https://api.webly.ai/llms.txt` is the full contract. Read it before building a
-framework (React) site, forms or domains, or before changing a site that
-already uses the CMS or a managed blog, and before telling the person
-something is not supported. If this file and the live API disagree, trust the API.
+`{api}/llms.txt` is the full contract, where `{api}` is the `api` that
+`webly.mjs doctor` reports (`https://api.webly.ai` unless `WEBLY_API_URL` is
+set). Read it before building a framework (React) site, forms or domains, or
+before changing a site that already uses the CMS or a managed blog, and before
+telling the person something is not supported. If this file and the live API disagree, trust the API.
 
 The helper that does every deterministic step is `scripts/webly.mjs` in this
 skill's folder (zero dependencies, Node 20+). Below, `webly` means
