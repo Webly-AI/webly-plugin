@@ -6,7 +6,8 @@ description: >-
   to keep it, edit it over MCP, and publish drafts they approve. Use when asked
   to "publish this", "host this", "deploy this", "put this online", "make a
   website", "share this as a web page", "give me a link to this site", "keep my
-  site", "claim my site", "make a Webly account", "connect Webly", or when
+  site", "claim my site", "make a Webly account", "connect Webly", "connect
+  my domain", "use my own domain", or when
   working on a site hosted on Webly (*.webly.site). Also use at the start of any
   session where a Webly site or an unfinished Webly step is waiting on this
   machine.
@@ -237,6 +238,48 @@ narrower than the task, so tell them which access level covers it. `401` /
 `invalid_token`: call a Webly tool again to re-trigger sign-in; don't start a
 second attempt while one is waiting. `409 Invalid edit lease`: re-acquire and
 re-read before writing.
+
+### Custom domains
+
+Needs a signed-in account (MCP). "Connect example.com to my site":
+
+1. Pick the site with `list_websites`. Never guess it from the hostname.
+2. For a bare domain, ask first:
+   - **`www.example.com` (recommended).** It works with every DNS provider.
+     The person then forwards `example.com` to it at their registrar, which is
+     free and takes a minute.
+   - **`example.com` directly.** Only if their DNS provider supports CNAME
+     flattening or ALIAS at the root (Cloudflare, Namecheap, Porkbun…).
+   For a subdomain such as `shop.example.com`, just add it.
+3. Call `add_domain`. Give the person the required `dns.records` **exactly as
+   returned**, as a Type / Name / Value table. For a www domain, also give the
+   `apexForward` forwarding rule. Provider tips:
+   - Type only the Name shown (`www`, or `@` for the root). GoDaddy and
+     Namecheap add the domain themselves.
+   - On Cloudflare, set the record to "DNS only" (grey cloud).
+   - Moving a domain that is live elsewhere? Keep its current record and add
+     only the optional TXT records. Then:
+     1. Poll `verify_domain` until the domain is `active`. That means ownership
+        is verified and the certificate is deployed. Step 2 isn't enough.
+        `domain-watch` can't show this yet, because the old host still answers.
+     2. Ask the person to switch the CNAME.
+     3. Run `webly domain-watch <hostname>` to confirm traffic now reaches
+        Webly.
+4. Start watching in the background right away. Don't wait for the person to
+   say they're done:
+   `webly domain-watch <hostname>` as a background task. It prints `dns`,
+   `https` and `live` as each happens and exits once the domain is live.
+   Without a shell, call `verify_domain` every `next.checkAgainSeconds`.
+   Every domain response has `next` with the step (1 DNS record, 2 HTTPS
+   certificate, 3 live) and what to do. Tell the person when each step
+   completes.
+5. Once live: confirm `https://<hostname>` loads, then offer
+   `set_primary_domain` so every other address redirects to it. If it's
+   `failed`, relay `failureMessage`, have them fix the record, then call
+   `verify_domain` again.
+
+Adding a domain publishes nothing and takes nothing offline. The
+`*.webly.site` address keeps working.
 
 ## Rules
 

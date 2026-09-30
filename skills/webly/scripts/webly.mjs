@@ -7,10 +7,11 @@ import { spawn, spawnSync } from 'node:child_process';
 import { homedir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.5.3';
+export const VERSION = '0.5.4';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -36,10 +37,30 @@ const USAGE = `Usage: webly.mjs <command>
   claim-link [--open]         Open (or print) the page that claims the site into an account
   connect claude|codex        Register the Webly MCP server for this agent host, at user scope
   pending set <intent> | clear   Remember a step to finish after a restart (e.g. claim)
+  domain-watch <hostname> [--timeout MIN]   Wait for a custom domain to go live: prints each step (dns, https, live),
+                              exits 0 once Webly serves it over HTTPS, 1 after the timeout (default 120). Run it in the background
   forget                      Delete the saved token only after the API confirms it is spent
   init                        Create the token without deploying
 
 Env: WEBLY_API_URL (default https://api.webly.ai), WEBLY_STATE_FILE (default ~/.webly/state.json)`;
+
+/**
+ * One look at a custom domain from this machine, no credentials needed:
+ * 'dns' (no record yet), 'https' (DNS resolves, Webly not serving it over HTTPS yet) or 'live'.
+ */
+export async function domainStage(host, fetchImpl = fetch) {
+  let target;
+  try { target = (await resolveCname(host))[0]; }
+  catch { try { target = (await resolve4(host))[0]; } catch { return { stage: 'dns', detail: 'no DNS record found yet' }; } }
+  try {
+    // Judge only this host's own answer: a redirect elsewhere (say, an old host pointing at a
+    // Webly site) must not count. Webly's own redirects (canonical 308) carry the header too.
+    const response = await fetchImpl(`https://${host}/`, { redirect: 'manual', signal: AbortSignal.timeout(15_000) });
+    if (response.headers.has('x-webly-version')) return { stage: 'live', detail: `https://${host}` };
+    const moved = response.status >= 300 && response.status < 400 ? `, redirecting to ${response.headers.get('location')}` : '';
+    return { stage: 'https', detail: `DNS points to ${target}, but Webly is not serving it yet (HTTP ${response.status}${moved}); the certificate may still be issuing, or the site is not published` };
+  } catch { return { stage: 'https', detail: `DNS points to ${target}; waiting for the HTTPS certificate` }; }
+}
 
 /** Delete the saved secret only if it still holds this token, so a newer one saved by a parallel run survives. */
 export async function forgetCredential(token, file = CREDENTIAL_FILE) {
@@ -271,6 +292,23 @@ async function main() {
     if (argument === 'set' && extra) { await mkdir(dirname(PENDING_FILE), { recursive: true, mode: 0o700 }); await writeFile(PENDING_FILE, extra + '\n'); return print(`Pending: ${extra}`); }
     if (argument === 'clear') { await unlink(PENDING_FILE).catch(() => {}); return print('Pending cleared'); }
     throw new Error('Usage: webly.mjs pending set <intent> | clear');
+  }
+
+  if (command === 'domain-watch') {
+    const host = String(argument ?? '').toLowerCase().replace(/^https?:\/\//, '').replace(/\/.*$/, '');
+    if (!host) throw new Error('Usage: webly.mjs domain-watch <hostname> [--timeout MIN]');
+    const minutes = extra === '--timeout' ? Number(argv[3]) : 120;
+    if (!(Number.isFinite(minutes) && minutes > 0) || (extra !== undefined && extra !== '--timeout')) throw new Error('Usage: webly.mjs domain-watch <hostname> [--timeout MIN]  (MIN is a number of minutes above 0)');
+    const deadline = Date.now() + minutes * 60_000;
+    // ponytail: fixed 30 s poll of one host; the server re-checks Cloudflare on its own every few minutes.
+    for (let last = ''; ;) {
+      const { stage, detail } = await domainStage(host);
+      if (stage + detail !== last) print(`${new Date().toISOString().slice(11, 19)} ${stage}: ${detail}`);
+      last = stage + detail;
+      if (stage === 'live') return;
+      if (Date.now() > deadline) { process.exitCode = 1; return print(`Still at "${stage}" after ${minutes} min. Run domain-watch again, or call verify_domain for the server's view.`); }
+      await new Promise(done => setTimeout(done, 30_000));
+    }
   }
 
   if (command === 'doctor') {
