@@ -1,8 +1,8 @@
 ---
 name: webly
 description: >-
-  Webly is website hosting for agents: publish a folder or an HTML file to a
-  live URL in seconds with no account, then let the person sign in and claim it
+  Webly hosts what agents make: publish a website, or share files and folders,
+  at a live URL in seconds with no account, then let the person sign in and claim it
   to keep it, edit it over MCP, and publish drafts they approve. Use when asked
   to "publish this", "host this", "deploy this", "put this online", "make a
   website", "share this as a web page", "give me a link to this site", "share
@@ -23,7 +23,7 @@ metadata:
 
 # Webly
 
-Webly hosts websites for agents. Without an account you can publish a site in
+Webly hosts the websites and shared files and folders that agents publish. Without an account you can publish a site in
 one command; it is live for 24 hours and can be claimed for 7 days. Once the
 person signs in (OAuth over MCP) the site is theirs: permanent, editable through
 Webly's MCP tools, with drafts, a quality gate, rollback, custom domains, forms
