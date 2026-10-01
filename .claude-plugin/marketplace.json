@@ -5,7 +5,7 @@
     "name": "Webly",
     "url": "https://webly.ai"
   },
-  "description": "Webly — website and file hosting for AI agents",
+  "description": "Webly — publish websites and share files from your AI agent",
   "version": "0.6.8",
   "plugins": [
     {

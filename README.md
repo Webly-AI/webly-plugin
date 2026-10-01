@@ -1,7 +1,7 @@
 # Webly skill and plugin
 
-[Webly](https://webly.ai) is hosting for agents: websites, and files and
-folders shared by link. This repo ships the `webly` skill: your agent publishes
+[Webly](https://webly.ai) hosts the websites and files your agent publishes.
+This repo ships the `webly` skill: your agent publishes
 a site or shares files in seconds with no account, and when you want to keep
 them, you sign in once and they become yours, editable over Webly's MCP server.
 
@@ -10,7 +10,7 @@ them, you sign in once and they become yours, editable over Webly's MCP server.
 Paste this into Claude Code, Codex, Cursor or any agent that can run commands:
 
 ```
-Set up Webly: hosting for agents, for websites and for sharing files and folders.
+Set up Webly so you can publish websites and share files and folders for me.
 If I have npm: npx skills add Webly-AI/webly-plugin --skill webly -g
 If not: curl -fsSL https://webly.ai/install.sh | bash
 Then read https://api.webly.ai/docs and ask me what I'd like to publish or share.
