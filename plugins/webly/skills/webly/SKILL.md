@@ -5,7 +5,8 @@ description: >-
   live URL in seconds with no account, then let the person sign in and claim it
   to keep it, edit it over MCP, and publish drafts they approve. Use when asked
   to "publish this", "host this", "deploy this", "put this online", "make a
-  website", "share this as a web page", "give me a link to this site", "keep my
+  website", "share this as a web page", "give me a link to this site", "share
+  these files", "send these files", "give me a download link", "keep my
   site", "claim my site", "make a Webly account", "connect Webly", "connect
   my domain", "use my own domain", or when
   working on a site hosted on Webly (*.webly.site). Also use at the start of any
@@ -119,6 +120,69 @@ site**, step 2.
 
 Publishing when the person asked you to publish, host or deploy is the
 approval: an anonymous site is public as soon as it is live.
+
+## Share files (no website)
+
+When the person wants to send or share files (a video, PDFs, a dataset,
+photos) rather than publish a site:
+
+1. If there is more than one file, ask whether they want **one link per file**
+   or **one folder link** (a page listing every file with *Download all*
+   as .zip). Both come back either way; you only choose what to show.
+2. Without an account: `webly upload <file|folder>… [--folder name]`. It prints
+   each file's link, the `folderUrl` and the `zipUrl`. A folder keeps its
+   subfolders and hidden files (`src/main.cpp`, `.gitignore`); only `.DS_Store` is left out. Over 500 files it uploads them as one zip archive, served as a folder. 500 MiB in total, 100 MiB per file; the
+   links work for 24 hours and must be claimed within those 24 hours
+   (**Keep the site**) or the files are deleted. If this machine's credential
+   already holds a website, claim that first.
+3. Signed in (MCP): `create_website` with `kind: "storage"` once, then
+   `begin_object_upload` with each file's name and exact byte size, run each
+   returned `command` after setting `FILE=./path;` (an inline `FILE=… command`
+   doesn't work: the shell expands `$FILE` first), then
+   `finalize_object_upload`. To keep a folder's structure, name each file by
+   its path inside it (`src/main.cpp`) and include hidden files (`.gitignore`, `.idea/…`); never flatten a folder or drop its hidden files. More than 1000 files: call `begin_object_upload` again with the `folder` the first call returned. Free keeps files up to 7 days (1 GB, 100 MB per
+   file); Base and Max can keep them forever (25 / 100 GB, 2 GB per file).
+   Never put file bytes in a tool call.
+
+Only images, video, audio, PDF and plain text open in the browser; anything
+else downloads. Tell the person when the links stop working (`expiresAt`).
+
+Managing shared files over MCP (the dashboard's Files page does the same):
+
+- `list_objects` lists files with their `folder` and `folderLabel`.
+- `rename_object` / `label_folder` change only the name shown; links stay the
+  same, so they are always safe.
+- `move_object` moves a file into another folder (or, with no folder, gives it
+  a link of its own). **Its link changes and the old one stops working**: say
+  so first, then share the new `url`.
+- `delete_object` / `delete_folder` delete for good. Confirm first.
+- **Big folders (more than 500 files): upload one zip as an archive.** Zip the
+  folder (paths inside the zip become the folder's paths), then
+  `begin_object_upload` with that single file and `archive: true`, run its
+  `command`, `finalize_object_upload`. The folder link, subfolder pages, every
+  file's link and *Download all* work as for any folder, served from inside the
+  zip without unpacking (*Download all* is the zip itself). `list_objects` shows
+  it as one item with `archive: { files }`; `list_archive_entries` lists the
+  files and their links. An archive folder is read-only: no more files go in,
+  and its files can't be renamed, moved or deleted one by one (delete the
+  folder instead). Zips must use stored or deflate entries, without encryption.
+- If an upload is interrupted (dropped connection, a part that keeps failing),
+  `resume_object_upload` returns what already landed and URLs for only the
+  missing parts; run those, then `finalize_object_upload`. Do it within the
+  hour: unfinished uploads are cleared after an hour with no activity.
+- `list_uploads_in_progress` shows unfinished uploads and their progress;
+  `clear_uploads_in_progress` cancels them to free the in-flight allowance
+  (Free 1 GB, Base 5 GB, Max 10 GB). Ask first.
+- Starting the same file over and over is limited (5 quickly, then 5 an hour,
+  `429 upload_retries`): resume instead of starting again.
+- `get_billing` shows `storage.used` (finished files, including site assets)
+  and `storage.uploading` against their limits, like the dashboard's bar.
+
+Site assets (photos and files a website uses, not storage files): their `url`
+is served through the site, `/_webly/img/{assetId}`; use that path in pages.
+`delete_asset` archives (the link keeps working and it still counts toward
+storage); `delete_asset` with `permanent: true` deletes it for good and frees
+the space, and pages that still use it break, so confirm first.
 
 ### What to tell the person
 

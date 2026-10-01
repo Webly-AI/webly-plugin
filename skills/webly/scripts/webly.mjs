@@ -4,14 +4,14 @@ import { mkdir, readFile, writeFile, readdir, open, link, unlink, lstat, stat, r
 import { realpathSync } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
-import { homedir } from 'node:os';
+import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.5.4';
+export const VERSION = '0.6.8';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -32,6 +32,10 @@ const USAGE = `Usage: webly.mjs <command>
   deploy <dir|file|payload.json> [--name N]   Publish anonymously: creates the site, or updates it if this machine has one.
                               A project with a package.json build script is built first and its output folder deployed.
   replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only)
+  upload <file|dir>... [--folder F] [--name N]   Share files without an account: one link per file plus a folder
+                              link with Download all (.zip). Folders keep their subfolders and hidden files; over 500
+                              files they go up as one zip, served as a folder. 500 MiB in total,
+                              live and claimable for 24 hours.
   status                      The saved site's status, URLs, deadlines and next step
   claim <code>                Claim the saved site with a code from the create_claim_code MCP tool (the secret never leaves this helper)
   claim-link [--open]         Open (or print) the page that claims the site into an account
@@ -284,6 +288,8 @@ async function main() {
   const argv = process.argv.slice(2);
   const nameAt = argv.indexOf('--name');
   const nameFlag = nameAt === -1 ? undefined : argv.splice(nameAt, 2)[1];
+  const folderAt = argv.indexOf('--folder');
+  const folderFlag = folderAt === -1 ? undefined : argv.splice(folderAt, 2)[1];
   const [command, argument, extra] = argv;
   const print = (value) => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   const readPending = async () => (await readFile(PENDING_FILE, 'utf8').catch(() => '')).trim() || null;
@@ -424,7 +430,7 @@ async function main() {
     return print({ claimed: true, alreadyClaimed: result.alreadyClaimed ?? false, name: result.website?.name, url: result.website?.urls?.published ?? null, claimHeld: result.website?.claimHeld, dashboardUrl: result.dashboardUrl, billingUrl: result.billingUrl });
   }
 
-  if (!['init', 'deploy', 'replace', 'update', 'status', 'claim-link'].includes(command)) throw new Error(USAGE);
+  if (!['init', 'deploy', 'replace', 'update', 'status', 'claim-link', 'upload'].includes(command)) throw new Error(USAGE);
   const token = await localCredential(base);
   if (command === 'init') return print(`Credential saved to ${CREDENTIAL_FILE}`);
   const failed = async (result, fallback) => {
@@ -450,6 +456,8 @@ async function main() {
     return print(current.body);
   }
 
+  if (command === 'upload') return print(await uploadFiles(base, token, argv.slice(1), { folder: folderFlag, name: nameFlag, failed }));
+
   if (!argument) throw new Error(`${command} needs a folder, a file or a payload.json`);
   const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
   const body = await payloadFrom(target, nameFlag);
@@ -472,6 +480,161 @@ async function main() {
   }
   if (!response.ok) await failed(response.body, `Request failed (${response.status})`);
   print(await settle(base, token, response.body));
+}
+
+const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml',
+  mp4: 'video/mp4', webm: 'video/webm', mov: 'video/quicktime', mp3: 'audio/mpeg', m4a: 'audio/mp4', wav: 'audio/wav', ogg: 'audio/ogg', txt: 'text/plain', md: 'text/markdown',
+  csv: 'text/csv', json: 'application/json', zip: 'application/zip', html: 'text/html' };
+
+/**
+ * Files named on the command line; folders contribute every file, hidden ones included (only
+ * macOS's .DS_Store is left out), and keep their structure: `upload ./test` names them
+ * "src/main.cpp", and with several arguments a folder's files go under its own name.
+ */
+async function filesFrom(paths) {
+  const out = [];
+  const lone = paths.length === 1 && (await stat(paths[0])).isDirectory();
+  async function add(path, name) {
+    const info = await stat(path);
+    if (info.isDirectory()) { for (const entry of await readdir(path)) if (entry !== '.DS_Store') await add(join(path, entry), name ? `${name}/${entry}` : entry); }
+    else if (info.isFile()) out.push({ path, name: name || basename(path), byteSize: info.size, mimeType: MIME[extname(path).slice(1).toLowerCase()] ?? 'application/octet-stream' });
+  }
+  for (const p of paths) await add(p, lone ? '' : basename(resolve(p)));
+  return out;
+}
+
+/**
+ * Anonymous file sharing: a storage site on this machine's credential (created on first use),
+ * one batch per run into its own folder. Bytes go straight to storage with the presigned PUTs.
+ */
+async function uploadFiles(base, token, paths, { folder, name, failed }) {
+  if (!paths.length) throw new Error('Usage: webly.mjs upload <file|dir>... [--folder name] [--name "Shared files"]');
+  let files = await filesFrom(paths);
+  if (!files.length) throw new Error('No files found to upload');
+  // A big folder goes up as one zip the server serves from inside: one upload instead of thousands.
+  const archived = files.length > ARCHIVE_OVER ? files.length : 0;
+  if (archived) files = [await zipToTemp(files, `${basename(resolve(paths[0]))}.zip`)];
+  const results = [];
+  const errors = [];
+  let first;
+  try {
+    const current = await api(base, '/sites/current', token);
+    let site = current.ok ? current.body : null;
+    if (site && site.kind !== 'storage') throw new Error(`This computer's anonymous credential already holds a website ("${site.name}"). Claim it first (webly.mjs claim-link), then share files from the account.`);
+    if (!site) {
+      const created = await api(base, '/sites', token, { method: 'POST', body: JSON.stringify({ name: name || 'Shared files', kind: 'storage' }) });
+      if (!created.ok) await failed(created.body, `Could not create the storage site (${created.status})`);
+      site = created.body;
+    }
+    // A batch holds up to 1000 files; a bigger folder goes up in several, all into the same folder.
+    for (let i = 0; i < files.length; i += 1000) {
+      const chunk = files.slice(i, i + 1000);
+      const out = await uploadBatch(base, token, site, folder ?? first?.folder, chunk, errors, failed);
+      first ??= out.begun;
+      results.push(...out.files);
+    }
+  } finally {
+    // The temp zip can be hundreds of MiB: never leave it behind, even when the upload fails.
+    if (archived) await rm(files[0].path, { force: true });
+  }
+  if (archived && results[0]?.ok) return {
+    folderUrl: first.folderUrl, zipUrl: first.zipUrl, expiresAt: first.expiresAt,
+    archive: { files: archived, note: `Over ${ARCHIVE_OVER} files, so they went up as one zip: the folder link, its subfolders and every file's link work as usual (read-only), and Download all is the zip.` },
+    next: 'These links stop working after 24 hours. To keep the files, claim them into a free account (1 GB): webly.mjs claim-link --open, or create_claim_code over MCP then webly.mjs claim <code>.',
+  };
+  return {
+    folderUrl: first.folderUrl, zipUrl: first.zipUrl, expiresAt: first.expiresAt,
+    // name is the path inside the folder ("sub/c.txt"), so the structure shows.
+    files: results.map((f) => f.ok ? { name: f.path ? f.path.split('/').slice(2).join('/') : f.name, url: f.url, size: f.size } : { id: f.id, error: f.error }),
+    ...(errors.length ? { errors } : {}),
+    next: 'These links stop working after 24 hours. To keep the files, claim them into a free account (1 GB): webly.mjs claim-link --open, or create_claim_code over MCP then webly.mjs claim <code>.',
+  };
+}
+
+/** Folders with more files than this upload as one archive zip. */
+const ARCHIVE_OVER = 500;
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+function crc32(buf) {
+  let c = 0xffffffff;
+  for (const b of buf) c = CRC_TABLE[(c ^ b) & 0xff] ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+/**
+ * Writes the files into a store-only zip in the temp folder, one file in memory at a time. Names are
+ * the files' paths inside the folder, so the server serves the same structure. Plain zip, not ZIP64:
+ * at most 65,535 files and 4 GB, well above the anonymous allowance.
+ */
+async function zipToTemp(files, name) {
+  if (files.length > 0xffff) throw new Error(`${files.length} files; one archive holds at most 65535`);
+  const path = join(tmpdir(), `webly-${randomUUID()}.zip`);
+  const out = await open(path, 'w');
+  const central = [];
+  let offset = 0;
+  try {
+    for (const f of files) {
+      const data = await readFile(f.path);
+      const fileName = Buffer.from(f.name);
+      const header = (size) => Buffer.alloc(size);
+      const crc = crc32(data);
+      const local = header(30);
+      local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(0x800, 6);
+      local.writeUInt32LE(crc, 14); local.writeUInt32LE(data.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(fileName.length, 26);
+      const cd = header(46);
+      cd.writeUInt32LE(0x02014b50, 0); cd.writeUInt16LE(20, 4); cd.writeUInt16LE(20, 6); cd.writeUInt16LE(0x800, 8);
+      cd.writeUInt32LE(crc, 16); cd.writeUInt32LE(data.length, 20); cd.writeUInt32LE(data.length, 24); cd.writeUInt16LE(fileName.length, 28); cd.writeUInt32LE(offset, 42);
+      if (offset + 30 + fileName.length + data.length > 0xffffffff) throw new Error('The folder is over 4 GB; share it in parts');
+      await out.write(Buffer.concat([local, fileName, data]));
+      central.push(cd, fileName);
+      offset += 30 + fileName.length + data.length;
+    }
+    const cdBytes = Buffer.concat(central);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(files.length, 8); end.writeUInt16LE(files.length, 10);
+    end.writeUInt32LE(cdBytes.length, 12); end.writeUInt32LE(offset, 16);
+    await out.write(Buffer.concat([cdBytes, end]));
+  } finally { await out.close(); }
+  return { path, name, byteSize: (await stat(path)).size, mimeType: 'application/zip', archive: true };
+}
+
+/** Begin, PUT and finalize one batch of up to 1000 files; what doesn't finish is cancelled. */
+async function uploadBatch(base, token, site, folder, files, errors, failed) {
+  const begun = await api(base, `/sites/${encodeURIComponent(site.id)}/objects/uploads`, token, { method: 'POST', body: JSON.stringify({ folder, files: files.map(({ name, byteSize, mimeType, archive }) => ({ name, byteSize, mimeType, archive })) }) });
+  if (!begun.ok) await failed(begun.body, `Upload refused (${begun.status})`);
+  // One PUT per small file, one per 100 MiB part of a larger one (a part is a byte range of the file).
+  const queue = [];
+  begun.body.files.forEach((f, i) => {
+    if (f.upload) queue.push({ name: f.name, url: f.upload.url, headers: { ...f.upload.headers }, path: files[i].path });
+    for (const p of f.parts ?? []) queue.push({ name: `${f.name} part ${p.partNumber}`, url: p.url, headers: {}, path: files[i].path, start: (p.partNumber - 1) * f.partSize, size: p.size });
+  });
+  const bytesOf = async (job) => {
+    if (job.start === undefined) return readFile(job.path);
+    const handle = await open(job.path, 'r');
+    try { const buf = Buffer.alloc(job.size); await handle.read(buf, 0, job.size, job.start); return buf; } finally { await handle.close(); }
+  };
+  // Two at a time, each retried: large uploads get reset now and then, and a presigned URL can be re-sent.
+  await Promise.all(Array.from({ length: 2 }, async () => {
+    for (let job = queue.shift(); job; job = queue.shift()) {
+      // Local servers without presigning take the PUT themselves and want this credential.
+      if (job.url.startsWith(base)) job.headers.Authorization = `Bearer ${token}`;
+      delete job.headers['Content-Length'];
+      const body = await bytesOf(job);
+      let response;
+      for (let attempt = 1; attempt <= 4; attempt++) {
+        response = await fetch(job.url, { method: 'PUT', headers: job.headers, body, signal: AbortSignal.timeout(15 * 60_000) }).catch((e) => ({ ok: false, status: e.message }));
+        if (response.ok || (response.status >= 400 && response.status < 500)) break;
+        await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
+      }
+      if (!response.ok) errors.push(`${job.name}: upload failed (${response.status})`);
+    }
+  }));
+  const finalized = await api(base, `/sites/${encodeURIComponent(site.id)}/objects/finalize`, token, { method: 'POST', body: JSON.stringify({ ids: begun.body.files.map((f) => f.id) }) });
+  // Cancel what didn't finish, so a retry isn't blocked by the abandoned upload.
+  const done = new Set(finalized.ok ? finalized.body.files.filter((f) => f.ok).map((f) => f.id) : []);
+  for (const f of begun.body.files) if (!done.has(f.id)) await api(base, `/sites/${encodeURIComponent(site.id)}/objects/${encodeURIComponent(f.id)}`, token, { method: 'DELETE' }).catch(() => {});
+  if (!finalized.ok) await failed(finalized.body, `Finalize failed (${finalized.status})`);
+  return { begun: begun.body, files: finalized.body.files };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(realpathSync(process.argv[1])).href) {
