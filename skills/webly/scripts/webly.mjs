@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.6.9';
+export const VERSION = '0.7.0';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -34,8 +34,8 @@ const USAGE = `Usage: webly.mjs <command>
   replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only)
   upload <file|dir>... [--folder F] [--name N]   Share files without an account: one link per file plus a folder
                               link with Download all (.zip). Folders keep their subfolders and hidden files; over 500
-                              files they go up as one zip, served as a folder. 500 MiB in total,
-                              live and claimable for 24 hours.
+                              files they go up as one zip, served as a folder. Works beside the website;
+                              500 MiB in total per token, website included. Live and claimable for 24 hours.
   status                      The saved site's status, URLs, deadlines and next step
   claim <code>                Claim the saved site with a code from the create_claim_code MCP tool (the secret never leaves this helper)
   claim-link [--open]         Open (or print) the page that claims the site into an account
@@ -427,7 +427,7 @@ async function main() {
     }
     await forgetCredential(token);
     await unlink(PENDING_FILE).catch(() => {});
-    return print({ claimed: true, alreadyClaimed: result.alreadyClaimed ?? false, name: result.website?.name, url: result.website?.urls?.published ?? null, claimHeld: result.website?.claimHeld, dashboardUrl: result.dashboardUrl, billingUrl: result.billingUrl });
+    return print({ claimed: true, alreadyClaimed: result.alreadyClaimed ?? false, name: result.website?.name, url: result.website?.urls?.published ?? null, claimHeld: result.website?.claimHeld, sharedFiles: result.storage ? true : undefined, dashboardUrl: result.dashboardUrl, billingUrl: result.billingUrl });
   }
 
   if (!['init', 'deploy', 'replace', 'update', 'status', 'claim-link', 'upload'].includes(command)) throw new Error(USAGE);
@@ -462,7 +462,9 @@ async function main() {
   const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
   const body = await payloadFrom(target, nameFlag);
   let response;
-  const current = command === 'replace' ? null : await api(base, '/sites/current', token);
+  // `current` is the shared files when there's no website yet; those never stand in for one.
+  const found = command === 'replace' ? null : await api(base, '/sites/current', token);
+  const current = found?.ok && found.body.kind === 'storage' ? { ok: false, status: 404, body: { message: 'No website yet' } } : found;
   if (current?.ok || command === 'update') {
     // One live site per token: publishing again updates it in place and keeps its URL.
     if (!current?.ok) await failed(current.body, 'No site to update');
@@ -518,9 +520,10 @@ async function uploadFiles(base, token, paths, { folder, name, failed }) {
   const errors = [];
   let first;
   try {
-    const current = await api(base, '/sites/current', token);
-    let site = current.ok ? current.body : null;
-    if (site && site.kind !== 'storage') throw new Error(`This computer's anonymous credential already holds a website ("${site.name}"). Claim it first (webly.mjs claim-link), then share files from the account.`);
+    // Shared files sit beside the website. Once their 24 hours are over, a new storage site starts another 24.
+    const current = await api(base, '/sites/storage', token);
+    if (!current.ok && current.status !== 404) await failed(current.body, `Could not read the shared files (${current.status})`);
+    let site = current.ok && current.body.status !== 'offline' ? current.body : null;
     if (!site) {
       const created = await api(base, '/sites', token, { method: 'POST', body: JSON.stringify({ name: name || 'Shared files', kind: 'storage' }) });
       if (!created.ok) await failed(created.body, `Could not create the storage site (${created.status})`);

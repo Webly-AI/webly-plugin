@@ -24,7 +24,9 @@ metadata:
 # Webly
 
 Webly hosts the websites and shared files and folders that agents publish. Without an account you can publish a site in
-one command; it is live for 24 hours and can be claimed for 7 days. Once the
+one command; it is live for 24 hours and can be claimed for 7 days. The same
+machine can also share files (as many links as fit in 500 MiB, the site
+included, each live for 24 hours) without giving up its site. Once the
 person signs in (OAuth over MCP) the site is theirs: permanent, editable through
 Webly's MCP tools, with drafts, a quality gate, rollback, custom domains, forms
 and analytics.
@@ -131,10 +133,14 @@ photos) rather than publish a site:
    as .zip). Both come back either way; you only choose what to show.
 2. Without an account: `webly upload <file|folder>… [--folder name]`. It prints
    each file's link, the `folderUrl` and the `zipUrl`. A folder keeps its
-   subfolders and hidden files (`src/main.cpp`, `.gitignore`); only `.DS_Store` is left out. Over 500 files it uploads them as one zip archive, served as a folder. 500 MiB in total, 100 MiB per file; the
+   subfolders and hidden files (`src/main.cpp`, `.gitignore`); only `.DS_Store` is left out. Over 500 files it uploads them as one zip archive, served as a folder. Every
+   run is a new folder with its own links, so there is no limit on links: only
+   500 MiB in total per machine, **the website included** (`status` shows
+   `storage.usedBytes` of `limitBytes`), 100 MiB per file. Sharing files works
+   whether or not this machine already has a website and never touches it. The
    links work for 24 hours and must be claimed within those 24 hours
-   (**Keep the site**) or the files are deleted. If this machine's credential
-   already holds a website, claim that first.
+   (**Keep the site**, which keeps the website and the files together) or the
+   files are deleted; sharing again after that starts a new 24 hours.
 3. Signed in (MCP): `create_website` with `kind: "storage"` once, then
    `begin_object_upload` with each file's name and exact byte size, run each
    returned `command` after setting `FILE=./path;` (an inline `FILE=… command`
@@ -211,7 +217,8 @@ the contents of `~/.webly/`.
 | `credential_consumed` / `credential_expired` | Token is dead (claimed, or past 7 days) | The helper already deleted it; the next deploy starts fresh |
 | `invite_only` (503) | Anonymous publishing is switched off | Sign in instead |
 | HTTP 429 | Rate limited | Wait for `Retry-After` |
-| HTTP 413 | Over the upload budget or size limit | Trim files, or sign in |
+| `anonymous_storage_limit` (413) | The 500 MiB (website and files together) is used up | Claim (**Keep the site**) to get a free account's 1 GB |
+| HTTP 413 | Over a size limit | Trim files, or sign in |
 
 ## Keep the site: sign in and claim
 
