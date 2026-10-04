@@ -162,6 +162,12 @@ Managing shared files over MCP (the dashboard's Files page does the same):
   a link of its own). **Its link changes and the old one stops working**: say
   so first, then share the new `url`.
 - `delete_object` / `delete_folder` delete for good. Confirm first.
+- **Passwords (Base and Max), only when the person asks.** `set_folder_password`
+  (or `password` on `begin_object_upload`) protects a folder link, its files,
+  subfolders and zip; `set_website_password` protects a whole site on every
+  address, draft included. Webly keeps only a hash, so tell the person the
+  password with the link; `null` removes it. On `402 plan_required`, give them
+  `details.upgradeUrl`.
 - **Big folders (more than 500 files): upload one zip as an archive.** Zip the
   folder (paths inside the zip become the folder's paths), then
   `begin_object_upload` with that single file and `archive: true`, run its
