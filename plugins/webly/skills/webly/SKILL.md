@@ -168,6 +168,10 @@ Managing shared files over MCP (the dashboard's Files page does the same):
   address, draft included. Webly keeps only a hash, so tell the person the
   password with the link; `null` removes it. On `402 plan_required`, give them
   `details.upgradeUrl`.
+- `email_link` emails a folder link (or a site's published or draft link) to
+  up to 10 people with an optional plain-text message (Base and Max). Webly
+  builds the link; confirm the recipients with the person first. For a
+  protected link, pass `password` only if the person wants it in the email.
 - **Big folders (more than 500 files): upload one zip as an archive.** Zip the
   folder (paths inside the zip become the folder's paths), then
   `begin_object_upload` with that single file and `archive: true`, run its
