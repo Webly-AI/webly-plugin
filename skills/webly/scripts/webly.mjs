@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /** Webly agent helper: anonymous deploys, local state for new sessions, and MCP setup. Zero dependencies. */
-import { mkdir, readFile, writeFile, readdir, open, link, unlink, lstat, stat, rm } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, readdir, open, link, unlink, lstat, stat, rm, rename, realpath } from 'node:fs/promises';
 import { realpathSync } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.7.2';
+export const VERSION = '0.8.0';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -20,6 +20,8 @@ const LEGACY_FILE = process.env.WEBLY_STATE_FILE ? null : join(homedir(), '.webl
 const PENDING_FILE = join(dirname(CREDENTIAL_FILE), 'pending');
 // The last VERSION that ran here, so the first run after an update can say so.
 const SEEN_FILE = join(dirname(CREDENTIAL_FILE), 'version');
+// The head version each site was at after this machine last deployed it: { websiteId: version }.
+const DEPLOYS_FILE = join(dirname(CREDENTIAL_FILE), 'deploys.json');
 const PLUGIN_MARKETPLACE = 'Webly-AI/webly-plugin';
 // The only server answers that mean the saved secret can never be used again.
 const SPENT = new Set(['credential_consumed', 'credential_expired']);
@@ -29,9 +31,17 @@ const TOKEN = /^wa_[A-Za-z0-9_-]{43}$/;
 
 const USAGE = `Usage: webly.mjs <command>
   doctor [--brief]            Saved site, MCP setup and pending step on this machine (never creates anything)
-  deploy <dir|file|payload.json> [--name N]   Publish anonymously: creates the site, or updates it if this machine has one.
-                              A project with a package.json build script is built first and its output folder deployed.
-  replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only)
+  deploy <dir|file|payload.json> [--name N] [--to E] [--anonymous]
+                              Publish the folder to the site it is linked to in .webly/project.json (entry E, default
+                              "default"). Unlinked, it updates this machine's anonymous site or creates one, then links the
+                              folder. Refuses, without publishing, when the linked site is in an account (update it over
+                              MCP), when the folder is unlinked but this machine is connected to an account (link it first;
+                              --anonymous publishes a throwaway site anyway, never over this machine's existing one;
+                              replace --anonymous discards that). Edits made to the site elsewhere since this
+                              machine's last deploy are replaced and reported as "replaced". A project with a package.json
+                              build script is built first and its output folder deployed.
+  link <websiteId> [--as E]   Link the project in this folder to a site (entry E, default "default") in .webly/project.json
+  replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only); relinks the folder
   upload <file|dir>... [--folder F] [--name N]   Share files without an account: one link per file plus a folder
                               link with Download all (.zip). Folders keep their subfolders and hidden files; over 500
                               files they go up as one zip, served as a folder. Works beside the website;
@@ -201,6 +211,71 @@ async function readJson(file) {
   try { return JSON.parse(await readFile(file, 'utf8')); } catch { return null; }
 }
 
+/**
+ * The project a deploy target belongs to: the nearest folder up with a package.json or .git, so the
+ * link lives beside the source and not in a build output that gets wiped. Never above $HOME; a
+ * target with neither is its own project.
+ */
+export async function projectRoot(target, home = homedir()) {
+  // Real paths, so the HOME stop holds through symlinks (macOS's /var is /private/var).
+  const real = (path) => realpath(path).catch(() => resolve(path));
+  const start = await real(await stat(target).then(i => i.isDirectory(), () => false) ? target : dirname(target));
+  const stop = await real(home);
+  for (let dir = start; dir !== stop && dirname(dir) !== dir; dir = dirname(dir)) {
+    for (const marker of ['package.json', '.git']) if (await stat(join(dir, marker)).catch(() => null)) return dir;
+  }
+  return start;
+}
+
+export const projectFile = (root) => join(root, '.webly', 'project.json');
+
+/** The project's links, { sites: { entry: { websiteId, name?, url? } } }. A file it can't read is an error, never overwritten. */
+export async function readProject(root) {
+  const file = projectFile(root);
+  let text;
+  try { text = await readFile(file, 'utf8'); } catch (error) { if (error.code === 'ENOENT') return { sites: {} }; throw error; }
+  let data;
+  try { data = JSON.parse(text); } catch { data = null; }
+  const isObject = (v) => v && typeof v === 'object' && !Array.isArray(v);
+  if (!isObject(data) || (data.sites !== undefined && !(isObject(data.sites) && Object.values(data.sites).every(s => isObject(s) && typeof s.websiteId === 'string')))) {
+    throw new Error(`${file} is not a Webly project file (expected {"sites": {"default": {"websiteId": "ws_…"}}}). It was left unchanged: fix or delete it.`);
+  }
+  return { ...data, sites: data.sites ?? {} };
+}
+
+/** Point one entry at a site. Other entries and keys this version doesn't know are kept. */
+export async function writeProject(root, entry, site) {
+  const data = await readProject(root);
+  const previous = data.sites[entry];
+  // Fields of a different site don't carry over to the new one.
+  data.sites[entry] = previous?.websiteId === site.websiteId ? { ...previous, ...site } : site;
+  const file = projectFile(root);
+  await mkdir(dirname(file), { recursive: true });
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n');
+  await rename(temporary, file);
+  return file;
+}
+
+/** Remember the head version this machine left a site at, and from which project folder. Never fails. */
+export async function recordDeploy(websiteId, version, path, file = DEPLOYS_FILE) {
+  if (!Number.isInteger(version)) return;
+  const all = (await readJson(file)) ?? {};
+  all[websiteId] = { version, path };
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  await mkdir(dirname(file), { recursive: true, mode: 0o700 })
+    .then(() => writeFile(temporary, JSON.stringify(all) + '\n'))
+    .then(() => rename(temporary, file))
+    .catch(() => unlink(temporary).catch(() => {}));
+}
+
+/** The version and folder this machine last deployed a site from; releases before 0.8.0 saved a bare version number. */
+export async function lastDeploy(websiteId, file = DEPLOYS_FILE) {
+  const saved = (await readJson(file))?.[websiteId];
+  if (Number.isInteger(saved)) return { version: saved, path: null };
+  return Number.isInteger(saved?.version) ? { version: saved.version, path: saved.path ?? null } : null;
+}
+
 /** Where this machine's agent hosts have the Webly MCP server registered. Reads config files only. */
 export async function mcpSetup(home = homedir()) {
   const claudeDir = process.env.CLAUDE_CONFIG_DIR || join(home, '.claude');
@@ -290,6 +365,9 @@ async function main() {
   const nameFlag = nameAt === -1 ? undefined : argv.splice(nameAt, 2)[1];
   const folderAt = argv.indexOf('--folder');
   const folderFlag = folderAt === -1 ? undefined : argv.splice(folderAt, 2)[1];
+  const option = (flag) => { const at = argv.indexOf(flag); return at === -1 ? undefined : argv.splice(at, 2)[1]; };
+  const toggle = (flag) => { const at = argv.indexOf(flag); if (at !== -1) argv.splice(at, 1); return at !== -1; };
+  const toFlag = option('--to'), asFlag = option('--as'), anonymousFlag = toggle('--anonymous');
   const [command, argument, extra] = argv;
   const print = (value) => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   const readPending = async () => (await readFile(PENDING_FILE, 'utf8').catch(() => '')).trim() || null;
@@ -298,6 +376,14 @@ async function main() {
     if (argument === 'set' && extra) { await mkdir(dirname(PENDING_FILE), { recursive: true, mode: 0o700 }); await writeFile(PENDING_FILE, extra + '\n'); return print(`Pending: ${extra}`); }
     if (argument === 'clear') { await unlink(PENDING_FILE).catch(() => {}); return print('Pending cleared'); }
     throw new Error('Usage: webly.mjs pending set <intent> | clear');
+  }
+
+  if (command === 'link') {
+    if (!/^ws_[\w-]+$/.test(argument ?? '')) throw new Error('Usage: webly.mjs link <websiteId> [--as <entry>]  (the id from list_websites, e.g. ws_…)');
+    const root = await projectRoot('.');
+    const entry = asFlag ?? 'default';
+    const file = await writeProject(root, entry, { websiteId: argument });
+    return print({ linked: argument, entry, file });
   }
 
   if (command === 'domain-watch') {
@@ -335,9 +421,16 @@ async function main() {
     }
     // A claim can't be pending without a token to claim with.
     if (report.pending === 'claim' && !report.credential.startsWith('present')) { await unlink(PENDING_FILE).catch(() => {}); report.pending = null; }
+    try {
+      const root = await projectRoot(process.cwd());
+      report.project = { root, file: projectFile(root), sites: (await readProject(root)).sites };
+    } catch (error) { report.project = { error: error.message }; }
     report.update = await updateCheck;
     if (!brief) return print(report);
     const parts = [];
+    const links = Object.entries(report.project.sites ?? {});
+    if (links.length) parts.push(`this folder deploys to ${links.map(([entry, s]) => `${s.name ? `"${s.name}" ` : ''}(${s.websiteId}${s.url ? `, ${s.url}` : ''})${entry === 'default' ? '' : ` as "${entry}"`}`).join(', ')}.`);
+    if (report.project.error) parts.push(report.project.error);
     if (report.site) {
       const s = report.site;
       parts.push(`anonymous site "${s.name}" is ${s.status}${s.urls.published ? ` at ${s.urls.published}` : ''}. ${s.next?.message ?? ''}`.trim());
@@ -431,15 +524,94 @@ async function main() {
   }
 
   if (!['init', 'deploy', 'replace', 'update', 'status', 'claim-link', 'upload'].includes(command)) throw new Error(USAGE);
-  const token = await localCredential(base);
-  if (command === 'init') return print(`Credential saved to ${CREDENTIAL_FILE}`);
-  const failed = async (result, fallback) => {
+  const failedFor = (token) => async (result, fallback) => {
     if (SPENT.has(result.details?.reason) && await forgetCredential(token)) {
       throw new Error(`${result.message || fallback} The saved credential is spent and was removed; the next deploy creates a new one.`);
     }
     const reason = result.details?.reason ? ` [${result.details.reason}]` : '';
     throw new Error(`${result.message || fallback}${reason}`);
   };
+
+  if (['deploy', 'replace', 'update'].includes(command)) {
+    if (!argument) throw new Error(`${command} needs a folder, a file or a payload.json`);
+    // Which site this folder belongs to is settled before anything is built, created or sent.
+    const root = await projectRoot(argument);
+    const entryName = toFlag ?? 'default';
+    const entry = (await readProject(root)).sites[entryName];
+    const setup = await mcpSetup();
+    const connected = setup.claudeCode.configured || setup.codex.configured;
+    let token = await savedCredential(base);
+    let site = null;
+    if (token) {
+      const found = await api(base, '/sites/current', token);
+      // `current` is the shared files when there's no website yet; those never stand in for one.
+      if (found.ok) site = found.body.kind === 'storage' ? null : found.body;
+      else if (SPENT.has(found.body.details?.reason)) { if (await forgetCredential(token)) token = null; }
+      // 404 is "no website yet"; anything else says nothing about which site this is.
+      else if (found.status !== 404) throw new Error(`Not deployed: could not read this machine's anonymous site (${found.status}${found.body.message ? `: ${found.body.message}` : ''}). Try again.`);
+    }
+    const as = entryName === 'default' ? '' : ` as "${entryName}"`;
+    if (entry && entry.websiteId !== site?.id) {
+      throw new Error(`Not deployed: this folder is linked${as} to the Webly site ${entry.name ? `"${entry.name}" ` : ''}(${entry.websiteId}${entry.url ? `, ${entry.url}` : ''}) in ${projectFile(root)}, ` +
+        'and it is not the anonymous site saved on this machine: it was claimed into an account, or the link came from someone else. ' +
+        (connected
+          ? `Update it over MCP: get_website ${entry.websiteId}, then deploy_files (a draft; publish_website after the person approves). ` +
+            'If get_website returns 404, the site is not in this account (a fork, another account, or deleted): ask the person whether to make a new site, then `webly link` it.'
+          : 'Sign in to update it: run `webly connect claude` (or `webly connect codex`), then update it over MCP. If the person has no access to it, ask whether to make a new site, then `webly link` it.'));
+    }
+    if (!entry && connected && !anonymousFlag) {
+      throw new Error(`Not deployed: this folder isn't linked to a Webly site yet (${projectFile(root)}), and this machine is connected to a Webly account, so nothing was published anonymously. ` +
+        `If the Webly MCP tools are loaded, call list_websites: if one of them is this project, run \`webly link <websiteId>${entryName === 'default' ? '' : ` --as ${entryName}`}\` and deploy again; otherwise create_website (kind "static") and link that. ` +
+        'If the tools are not loaded, ask the person to start a new session (or run /reload-plugins). ' +
+        (site ? `This machine also has an unclaimed anonymous site "${site.name}" (${site.urls?.published ?? site.id}); claim it only if the person wants that one. ` : '') +
+        (site ? `For a throwaway anonymous site anyway, \`webly replace ${argument} --anonymous\` discards that one for a new URL; it takes that site offline, so only with the person's explicit OK.` : 'For a throwaway anonymous site anyway, rerun with --anonymous.'));
+    }
+    if (!entry && anonymousFlag && site && command !== 'replace') {
+      throw new Error(`Not deployed: this machine's one anonymous site is "${site.name}" (${site.urls?.published ?? site.id}), and --anonymous would replace its files. ` +
+        `Claim it first if the person wants to keep it. \`webly replace ${argument} --anonymous\` discards it for a new URL and takes it offline: tell the person that and run it only with their explicit OK.`);
+    }
+    if (!entry && entryName !== 'default') {
+      throw new Error(`Not deployed: no site is linked as "${entryName}", and a computer without an account has a single anonymous site. Sign in to Webly for more sites, then \`webly link <websiteId> --as ${entryName}\`.`);
+    }
+    if (command === 'replace') site = null;
+    else if (!site && command === 'update') throw new Error('No site to update');
+    // Edits made elsewhere don't block a deploy (every version is kept, so it can be rolled back); the result says what it replaced.
+    const last = site ? await lastDeploy(site.id) : null;
+    const replaced = last && site.headVersion > last.version
+      ? { fromVersion: last.version, toVersion: site.headVersion, note: `"${site.name}" was changed somewhere else after this computer last deployed it (version ${last.version}, then ${site.headVersion}); this deploy replaced those changes. Tell the person: earlier versions are kept, so it can be rolled back.` }
+      : undefined;
+
+    const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
+    const body = await payloadFrom(target, nameFlag);
+    let response;
+    if (site) {
+      // One live site per token: publishing again updates it in place and keeps its URL.
+      const { kind, ...rest } = body;
+      response = await api(base, `/sites/${encodeURIComponent(site.id)}`, token, { method: 'PUT', body: JSON.stringify({ ...rest, expectedHeadVersion: site.headVersion }) });
+    } else {
+      // Only creation takes the name; updates keep whatever the site is already called.
+      const named = typeof body.name === 'string' ? body.name.trim() : '';
+      if (!nameFlag && (!named || isGenericName(named))) {
+        throw new Error(`Not deployed: the site would be ${named ? `named "${named}", which says nothing about it` : 'unnamed'}. Ask the person what this project is called. ` +
+          'Make clear it is only the name shown in their Webly dashboard and on the claim page, not the web address: the URL is assigned automatically (https://anon-….webly.site). ' +
+          `Then rerun: webly ${command} ${argument} --name "<their answer>"`);
+      }
+      token ??= await localCredential(base);
+      response = await api(base, '/sites', token, { method: 'POST', body: JSON.stringify(command === 'replace' ? { ...body, replace: true } : body) });
+    }
+    if (!response.ok) await failedFor(token)(response.body, `Request failed (${response.status})`);
+    const result = await settle(base, token, response.body);
+    await recordDeploy(result.id, result.headVersion, root);
+    try {
+      const file = await writeProject(root, entryName, { websiteId: result.id, name: result.name, url: result.urls?.published ?? result.urls?.draft ?? undefined });
+      if (entry?.websiteId !== result.id) console.error(`Webly: linked this folder to "${result.name}" in ${file}; commit it so every clone deploys to the same site.`);
+    } catch (error) { console.error(`Webly: deployed, but could not save the folder's link: ${error.message}`); }
+    return print(replaced ? { ...result, replaced } : result);
+  }
+
+  const token = await localCredential(base);
+  if (command === 'init') return print(`Credential saved to ${CREDENTIAL_FILE}`);
+  const failed = failedFor(token);
 
   if (command === 'claim-link') {
     const current = await api(base, '/sites/current', token);
@@ -456,32 +628,7 @@ async function main() {
     return print(current.body);
   }
 
-  if (command === 'upload') return print(await uploadFiles(base, token, argv.slice(1), { folder: folderFlag, name: nameFlag, failed }));
-
-  if (!argument) throw new Error(`${command} needs a folder, a file or a payload.json`);
-  const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
-  const body = await payloadFrom(target, nameFlag);
-  let response;
-  // `current` is the shared files when there's no website yet; those never stand in for one.
-  const found = command === 'replace' ? null : await api(base, '/sites/current', token);
-  const current = found?.ok && found.body.kind === 'storage' ? { ok: false, status: 404, body: { message: 'No website yet' } } : found;
-  if (current?.ok || command === 'update') {
-    // One live site per token: publishing again updates it in place and keeps its URL.
-    if (!current?.ok) await failed(current.body, 'No site to update');
-    const { kind, ...rest } = body;
-    response = await api(base, `/sites/${encodeURIComponent(current.body.id)}`, token, { method: 'PUT', body: JSON.stringify({ ...rest, expectedHeadVersion: current.body.headVersion }) });
-  } else {
-    // Only creation takes the name; updates keep whatever the site is already called.
-    const named = typeof body.name === 'string' ? body.name.trim() : '';
-    if (!nameFlag && (!named || isGenericName(named))) {
-      throw new Error(`Not deployed: the site would be ${named ? `named "${named}", which says nothing about it` : 'unnamed'}. Ask the person what this project is called. ` +
-        'Make clear it is only the name shown in their Webly dashboard and on the claim page, not the web address: the URL is assigned automatically (https://anon-….webly.site). ' +
-        `Then rerun: webly ${command} ${argument} --name "<their answer>"`);
-    }
-    response = await api(base, '/sites', token, { method: 'POST', body: JSON.stringify(command === 'replace' ? { ...body, replace: true } : body) });
-  }
-  if (!response.ok) await failed(response.body, `Request failed (${response.status})`);
-  print(await settle(base, token, response.body));
+  return print(await uploadFiles(base, token, argv.slice(1), { folder: folderFlag, name: nameFlag, failed }));
 }
 
 const MIME = { pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif', webp: 'image/webp', avif: 'image/avif', svg: 'image/svg+xml',
@@ -498,7 +645,7 @@ async function filesFrom(paths) {
   const lone = paths.length === 1 && (await stat(paths[0])).isDirectory();
   async function add(path, name) {
     const info = await stat(path);
-    if (info.isDirectory()) { for (const entry of await readdir(path)) if (entry !== '.DS_Store') await add(join(path, entry), name ? `${name}/${entry}` : entry); }
+    if (info.isDirectory()) { for (const entry of await readdir(path)) if (entry !== '.DS_Store' && entry !== '.webly') await add(join(path, entry), name ? `${name}/${entry}` : entry); }
     else if (info.isFile()) out.push({ path, name: name || basename(path), byteSize: info.size, mimeType: MIME[extname(path).slice(1).toLowerCase()] ?? 'application/octet-stream' });
   }
   for (const p of paths) await add(p, lone ? '' : basename(resolve(p)));

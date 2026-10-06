@@ -57,6 +57,9 @@ on disk and at the API. Rebuild it before doing anything:
      `next` (what the API says is allowed right now).
    - `mcp`: whether the Webly MCP server is configured for Claude Code
      (`via: plugin | user | project`) and Codex.
+   - `project`: the site(s) the project in the current folder is linked to
+     (`.webly/project.json`, see **Linked folders**), or `error` if that file
+     can't be read.
    - `pending`: a step an earlier session asked you to finish, e.g. `claim`.
    - `updatedFrom`: set on the first run after this skill was updated. Tell
      the person in one line which version they are now on.
@@ -71,14 +74,19 @@ on disk and at the API. Rebuild it before doing anything:
    Resolve deferred tools with tool search before deciding a tool is absent.
    Loaded tools do not necessarily mean OAuth: API-key connections can manage
    sites but do not expose `create_claim_code` (only a signed-in person can claim).
-3. Pick the row and follow it:
+3. **The folder's link comes first.** If `project.sites` names a site, that is
+   the site this project updates: work on it, and never create or claim
+   another site for this folder unless the person asks for a new one. If it is
+   this machine's anonymous site, `webly deploy` updates it. If not, it is in
+   an account: update it over MCP (**Working over MCP**).
+4. Pick the row and follow it:
 
 | # | Token saved | Webly MCP tools loaded | Who this is | Do this |
 |---|---|---|---|---|
-| 1 | no | no | New to Webly | **Publish without an account** (below). Don't set up MCP until they want to keep the site. |
+| 1 | no | no | New to Webly, or tools not loaded | If `mcp` shows Webly configured, they have an account: don't publish anonymously; ask them to start a new session (or type `/reload-plugins`) so the tools load. Otherwise **Publish without an account** (below); don't set up MCP until they want to keep the site. |
 | 2 | yes | no | Published before; MCP was never set up or didn't load | Read `site.next`. While it lists `update`, keep publishing with `webly deploy`. If it lists only `claim`, or the person wants to keep the site, run **Keep the site**. |
 | 3 | no | yes | Signed in | Use **Working over MCP**. Anything they deployed anonymously was already claimed. |
-| 4 | yes | yes | Connected with a site still unclaimed | Claim it: **Keep the site**, step 5. Never read `credentialFile` yourself. Continue with **Working over MCP** after claiming. |
+| 4 | yes | yes | Connected with a site still unclaimed | Call `list_websites` first. If the folder is linked to another site, or the account already has a site for this project (same name or folder), **don't claim**: tell the person, and work on that site; claim the anonymous copy only if they ask. Otherwise claim it: **Keep the site**, step 5. Never read `credentialFile` yourself. Continue with **Working over MCP** after claiming. |
 
 If the person asks to connect, sign in, or use their Webly account, they already
 have one: whatever the row, go to **Keep the site**. With a token saved, run it all.
@@ -87,8 +95,9 @@ loaded; if they aren't, ask the person to type `/reload-plugins` (Claude Code) o
 start a new session, since sign-in needs the MCP tools. Don't publish anonymously
 for them.
 
-If `pending` is `claim` and the claim tool is available, finish the claim now (row 4),
-without asking again: the person already asked for it before the restart. If
+If `pending` is `claim` and the claim tool is available, finish the claim now (row 4,
+including its `list_websites` check), without asking again: the person already
+asked for it before the restart. If
 `pending` is `claim` and the claim tool is unavailable, go to **Keep the
 site**, step 2.
 
@@ -122,6 +131,47 @@ site**, step 2.
 
 Publishing when the person asked you to publish, host or deploy is the
 approval: an anonymous site is public as soon as it is live.
+
+## Linked folders
+
+The first deploy from a project writes `.webly/project.json` at the project's
+root (the nearest folder with `package.json` or `.git`, never inside `dist/`):
+
+```json
+{ "sites": { "default": { "websiteId": "ws_…", "name": "…", "url": "https://….webly.site/" } } }
+```
+
+It holds no secret (the token stays in `~/.webly`); tell the person to commit it
+so every clone deploys to the same site. Redeploying a linked folder is an
+update of that site, never a new one. `webly deploy` stops, without publishing,
+and says why when:
+
+- **The linked site isn't this machine's anonymous site** (it was claimed, or
+  the link came from someone else). Update it over MCP. If `get_website` is a
+  404 (a fork, another account, a deleted site), ask the person whether to make
+  a new site; never make one on your own.
+- **The folder isn't linked and this machine is connected to an account.**
+  Call `list_websites`. If a site's name matches the project, ask "update
+  *X*, or make a new site?" (default: update) and never pick between similar
+  names yourself. Then `webly link <websiteId>`. For a new site,
+  `create_website` and link that. `--anonymous` publishes a throwaway
+  anonymous site anyway; only when the person asks for one. It never
+  overwrites this machine's existing anonymous site. `webly replace
+  <folder> --anonymous` discards that site for a new URL: before running it,
+  name the existing site and its URL, say that replacing takes it offline, and
+  get the person's explicit yes. Asking for another anonymous site is not that
+  yes.
+- **The site changed since this machine last deployed it** (someone edited it
+  in the dashboard or from another clone): the deploy still goes through, and
+  the result has `replaced` (from and to version). Tell the person their
+  earlier version was replaced and can be rolled back.
+
+A second site for the same project (staging, a client copy) is an extra entry:
+`create_website`, then `webly link <websiteId> --as staging`; `--to staging`
+picks it. Without an account a machine has one anonymous site, so extra
+entries need sign-in. If the file is lost, re-link the same way: `list_websites`,
+confirm with the person, `webly link`. A file the helper can't read is never
+overwritten: fix it or delete it.
 
 ## Share files (no website)
 
@@ -289,8 +339,10 @@ which one the response shows (`website.claimHeld`); don't promise permanence.
 
 ## Working over MCP (signed in)
 
-Call `whoami` and `list_websites` first, and continue an existing site rather
-than creating a second one.
+Call `whoami` and `list_websites` first, and continue an existing site (the
+folder's linked one, if `doctor` shows a link) rather than creating a second
+one. After `create_website` for a project on disk, run `webly link
+<websiteId>` in the project folder so later sessions find it.
 
 1. Framework sites (typed React, the default): `acquire_edit_lease`, then
    `put_source_file` / `str_replace`. Static sites: `deploy_files`. Each write
@@ -370,4 +422,6 @@ Adding a domain publishes nothing and takes nothing offline. The
 - Don't set up MCP for someone who only wants a quick link; offer it when they
   want to keep or grow the site.
 - One anonymous site per machine. If they want a second site kept, claim the
-  first, then deploy again.
+  first, then create the second over MCP and `webly link` it.
+- A folder belongs to the site in its `.webly/project.json`. Never deploy it
+  to, or claim, a different site unless the person asks.
