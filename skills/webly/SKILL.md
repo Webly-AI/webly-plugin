@@ -345,7 +345,10 @@ one. After `create_website` for a project on disk, run `webly link
 <websiteId>` in the project folder so later sessions find it.
 
 1. Framework sites (typed React, the default): `acquire_edit_lease`, then
-   `put_source_file` / `str_replace`. Static sites: `deploy_files`. Each write
+   `put_source_file` / `str_replace`. Static sites: `deploy_files` for a few
+   small files; for a folder on disk (a build's `dist/`), call `begin_deploy`
+   and run its `upload.command` with `DIR` set to the folder. Never put a
+   bundle's bytes in a tool call or an API key in a shell command. Each write
    makes a new draft version; the live site doesn't change. Writes are
    Prettier-formatted, so copy `str_replace` text from `read_source_file`.
 2. `check_head` runs the quality gate (lint, typecheck, bundle, render). Fix
