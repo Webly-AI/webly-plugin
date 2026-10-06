@@ -358,9 +358,16 @@ one. After `create_website` for a project on disk, run `webly link
 4. `publish_website` only after they say yes to that exact site and version.
    `rollback_website` / `unpublish_website` if something is wrong live.
 
-New sites: `create_website` names the subdomain after the site; if that's taken
-it gets a suffix (`portfolio-x7k2p9`). Pass `subdomain` only when the person asks
-for a specific one (up to 56 characters); a taken one is a `409`, not a variant.
+New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pass
+`subdomain` unless the person asks for a specific one (up to 56 characters; a taken
+one is a `409`, not a variant). On Base and Max the workspace also has a namespace
+and each published site answers at `urls.vanity`
+(`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
+within the namespace). Share `urls.vanity` when there is one. `rename_vanity`
+changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
+handle the namespace. Renames are scarce (Base 1, Max 5, lifetime), so rename
+only to the exact name the person asked for, and tell them old vanity addresses
+stop working. On `402`, give them `details.upgradeUrl`.
 
 New content, including blog posts and repeating content (products, team, FAQs),
 goes in the site's source files; don't create collections or blog posts, the CMS
