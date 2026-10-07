@@ -375,7 +375,9 @@ New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pa
 one is a `409`, not a variant). On Base and Max the workspace also has a namespace
 and each published site answers at `urls.vanity`
 (`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
-within the namespace). Share `urls.vanity` when there is one. `rename_vanity`
+within the namespace). Share `urls.primary`: the main address (a custom domain
+when one is live, else the vanity, else the flat address); `urls.all` lists every
+address the site answers at. `rename_vanity`
 changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
 handle the namespace. Renames are scarce (Base 1, Max 5, lifetime), so rename
 only to the exact name the person asked for, and tell them old vanity addresses
