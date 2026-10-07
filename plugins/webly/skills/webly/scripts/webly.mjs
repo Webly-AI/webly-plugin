@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.8.2';
+export const VERSION = '0.9.0';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -27,6 +27,8 @@ const PLUGIN_MARKETPLACE = 'Webly-AI/webly-plugin';
 const SPENT = new Set(['credential_consumed', 'credential_expired']);
 // Mirrors the server's anonymous limits so a too-big folder fails before any request.
 const MAX_FILES = 25, MAX_FILE_BYTES = 1024 * 1024, MAX_TOTAL_BYTES = 5 * 1024 * 1024;
+// And its limits for a deploy ticket (signed-in static sites): MAX_SOURCE_FILES and MAX_TICKET_DEPLOY_BYTES.
+const MAX_TICKET_FILES = 2000, MAX_TICKET_BYTES = 100 * 1024 * 1024;
 const TOKEN = /^wa_[A-Za-z0-9_-]{43}$/;
 
 const USAGE = `Usage: webly.mjs <command>
@@ -34,12 +36,17 @@ const USAGE = `Usage: webly.mjs <command>
   deploy <dir|file|payload.json> [--name N] [--to E] [--anonymous]
                               Publish the folder to the site it is linked to in .webly/project.json (entry E, default
                               "default"). Unlinked, it updates this machine's anonymous site or creates one, then links the
-                              folder. Refuses, without publishing, when the linked site is in an account (update it over
-                              MCP), when the folder is unlinked but this machine is connected to an account (link it first;
+                              folder. Refuses, without publishing, when the linked site is in an account (begin_deploy over
+                              MCP, then --ticket), when the folder is unlinked but this machine is connected to an account (link it first;
                               --anonymous publishes a throwaway site anyway, never over this machine's existing one;
                               replace --anonymous discards that). Edits made to the site elsewhere since this
                               machine's last deploy are replaced and reported as "replaced". A project with a package.json
                               build script is built first and its output folder deployed.
+  deploy <dir|file> --ticket T [--to E] [--force]
+                              Signed in: upload the folder to a static site with the ticket from the begin_deploy MCP tool
+                              (5 minutes, one deploy). Makes a draft; publish_website after the person approves. Up to 2000
+                              files, 1 MiB each, 100 MiB in all. Refuses (would_revert) if it would undo changes made to the
+                              site since this folder's last deploy; --force replaces them anyway, only with the person's OK
   link <websiteId> [--as E]   Link the project in this folder to a site (entry E, default "default") in .webly/project.json
   replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only); relinks the folder
   upload <file|dir>... [--folder F] [--name N]   Share files without an account: one link per file plus a folder
@@ -170,13 +177,8 @@ export async function siteName(target, isFile) {
   return basename(resolve(target));
 }
 
-/** A folder, a single file, or a ready-made payload.json becomes an anonymous site body. */
-export async function payloadFrom(target, name) {
-  const info = await stat(target);
-  if (info.isFile() && extname(target) === '.json') {
-    const payload = JSON.parse(await readFile(target, 'utf8'));
-    return name === undefined ? payload : { ...payload, name };
-  }
+/** The files a site is published from, sorted: a single file, or a folder without hidden entries and node_modules. */
+async function siteFiles(target, info) {
   const found = [];
   if (info.isFile()) {
     found.push({ path: extname(target) === '.html' ? '/index.html' : `/${basename(target)}`, abs: target });
@@ -192,10 +194,51 @@ export async function payloadFrom(target, name) {
     await walk(target);
   }
   if (!found.length) throw new Error(`No files to publish in ${target}`);
+  return found.sort((a, b) => a.path.localeCompare(b.path));
+}
+
+/** A deploy ticket's site and head version. It is signed, not encrypted, so the claims are readable. */
+export function ticketClaims(ticket) {
+  const m = /^wd_([A-Za-z0-9_-]+)\.\d+\.[A-Za-z0-9_-]+$/.exec(ticket ?? '');
+  try { const claims = m && JSON.parse(Buffer.from(m[1], 'base64url').toString()); if (typeof claims?.websiteId === 'string') return claims; } catch {}
+  throw new Error('That is not a deploy ticket: pass the `ticket` that begin_deploy returned (wd_…).');
+}
+
+/**
+ * The multipart upload for a signed-in static site, under the server's limits: 1 MiB per file,
+ * MAX_TICKET_FILES files, MAX_TICKET_BYTES in all. Over any of them, nothing is sent.
+ */
+export async function ticketForm(target, fields = {}) {
+  const info = await stat(target);
+  const found = await siteFiles(target, info);
+  if (found.length > MAX_TICKET_FILES) throw new Error(`${found.length} files found; a deploy takes at most ${MAX_TICKET_FILES}. Nothing was sent.`);
+  const form = new FormData();
+  // Each part's multipart header counts too: the server caps the whole request.
+  let total = 0;
+  for (const { path, abs } of found) {
+    const bytes = await readFile(abs);
+    if (bytes.length > MAX_FILE_BYTES) throw new Error(`${path} is larger than 1 MiB, the per-file limit. Nothing was sent.`);
+    total += bytes.length + path.length + 256;
+    if (total > MAX_TICKET_BYTES) throw new Error(`The files add up to more than ${MAX_TICKET_BYTES / 1024 / 1024} MiB, the per-deploy limit. Nothing was sent.`);
+    // No type: the server sets it from the path.
+    form.append('files', new Blob([bytes]), path.slice(1));
+  }
+  for (const [key, value] of Object.entries(fields)) if (value !== undefined) form.append(key, String(value));
+  return { form, count: found.length };
+}
+
+/** A folder, a single file, or a ready-made payload.json becomes an anonymous site body. */
+export async function payloadFrom(target, name) {
+  const info = await stat(target);
+  if (info.isFile() && extname(target) === '.json') {
+    const payload = JSON.parse(await readFile(target, 'utf8'));
+    return name === undefined ? payload : { ...payload, name };
+  }
+  const found = await siteFiles(target, info);
   if (found.length > MAX_FILES) throw new Error(`${found.length} files found; anonymous sites take at most ${MAX_FILES}. Publish a built output folder, or sign in for larger sites.`);
   let total = 0;
   const files = [];
-  for (const { path, abs } of found.sort((a, b) => a.path.localeCompare(b.path))) {
+  for (const { path, abs } of found) {
     const bytes = await readFile(abs);
     if (bytes.length > MAX_FILE_BYTES) throw new Error(`${path} is larger than 1 MiB, the anonymous per-file limit`);
     total += bytes.length;
@@ -356,6 +399,51 @@ function run(cmd, args, cwd) {
   return { ok: result.status === 0, output: `${result.stdout ?? ''}${result.stderr ?? ''}`.trim(), missing: result.error?.code === 'ENOENT' };
 }
 
+/**
+ * Deploy a folder to a signed-in static site with a ticket from begin_deploy: the bytes go straight
+ * to Webly from here, never through a tool call, and no API key is involved. The result is a draft.
+ */
+async function ticketDeploy(base, { command, argument, root, entryName, entry, ticket, force }) {
+  if (command !== 'deploy') throw new Error(`--ticket works with deploy, not ${command}.`);
+  const { websiteId } = ticketClaims(ticket);
+  if (entry && entry.websiteId !== websiteId) {
+    throw new Error(`Not deployed: the ticket is for ${websiteId}, but this folder is linked${entryName === 'default' ? '' : ` as "${entryName}"`} to ${entry.websiteId}${entry.name ? ` ("${entry.name}")` : ''} in ${projectFile(root)}. ` +
+      `Call begin_deploy with websiteId ${entry.websiteId}, or, if the person wants this folder on the other site, \`webly link ${websiteId}\` first.`);
+  }
+  const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
+  // The base is only meaningful for deploys from this same project folder.
+  const last = await lastDeploy(websiteId);
+  const baseVersion = !force && last?.path === root ? last.version : undefined;
+  const { form, count } = await ticketForm(target, { baseVersion, force: force || undefined });
+  const response = await fetch(`${base}/public/v1/deploys`, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
+    headers: { Authorization: `Bearer ${ticket}` }, body: form,
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const d = result.details ?? {};
+    if (d.reason === 'would_revert') {
+      throw new Error(`Not deployed: this would undo changes made to the site since this folder last deployed it (version ${d.baseVersion}, now ${d.headVersion}): ${(d.paths ?? []).join(', ')}. ` +
+        'Read the live files with read_source_files, merge those changes into the local project, rebuild, then get a new ticket with begin_deploy and deploy again. ' +
+        'Or tell the person what would be undone and, only with their OK, deploy again with a new ticket and --force (earlier versions are kept either way).');
+    }
+    if (response.status === 401) throw new Error('Not deployed: the ticket is invalid or expired (they last 5 minutes and work once). Get a new one with begin_deploy and run this again straight away.');
+    if (response.status === 409 && d.expectedHeadVersion !== undefined) throw new Error('Not deployed: the site changed after this ticket was issued. Get a new ticket with begin_deploy and deploy again.');
+    throw new Error(`Not deployed: ${result.message || `request failed (${response.status})`}${d.reason ? ` [${d.reason}]` : ''}`);
+  }
+  await recordDeploy(websiteId, result.headVersion, root);
+  try {
+    const file = await writeProject(root, entryName, { websiteId, url: result.urls?.published ?? result.urls?.draft ?? undefined });
+    if (!entry) console.error(`Webly: linked this folder to ${websiteId} in ${file}; commit it so every clone deploys to the same site.`);
+  } catch (error) { console.error(`Webly: deployed, but could not save the folder's link: ${error.message}`); }
+  return {
+    websiteId, version: result.version, headVersion: result.headVersion, publishedVersion: result.publishedVersion, files: count, urls: result.urls,
+    // Without a base the server can't tell an edit made elsewhere from this folder's own last deploy.
+    ...(result.replaced && baseVersion !== undefined && { replaced: { ...result.replaced, note: `This draft replaced version ${result.replaced.fromVersion}, which was made somewhere else. Tell the person; earlier versions are kept, so it can be rolled back.` } }),
+    next: `This is a draft: show the person ${result.urls?.draft ?? 'the draft URL'} and call publish_website only after they approve it.`,
+  };
+}
+
 async function main() {
   const base = new URL(process.env.WEBLY_API_URL || 'https://api.webly.ai').origin;
   const url = new URL(base);
@@ -367,7 +455,7 @@ async function main() {
   const folderFlag = folderAt === -1 ? undefined : argv.splice(folderAt, 2)[1];
   const option = (flag) => { const at = argv.indexOf(flag); return at === -1 ? undefined : argv.splice(at, 2)[1]; };
   const toggle = (flag) => { const at = argv.indexOf(flag); if (at !== -1) argv.splice(at, 1); return at !== -1; };
-  const toFlag = option('--to'), asFlag = option('--as'), anonymousFlag = toggle('--anonymous');
+  const toFlag = option('--to'), asFlag = option('--as'), ticketFlag = option('--ticket'), anonymousFlag = toggle('--anonymous'), forceFlag = toggle('--force');
   const [command, argument, extra] = argv;
   const print = (value) => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   const readPending = async () => (await readFile(PENDING_FILE, 'utf8').catch(() => '')).trim() || null;
@@ -538,6 +626,10 @@ async function main() {
     const root = await projectRoot(argument);
     const entryName = toFlag ?? 'default';
     const entry = (await readProject(root)).sites[entryName];
+    if (ticketFlag !== undefined) {
+      if (anonymousFlag) throw new Error('--ticket deploys to the signed-in site the ticket names; --anonymous makes a throwaway anonymous one. Pass one, not both.');
+      return print(await ticketDeploy(base, { command, argument, root, entryName, entry, ticket: ticketFlag, force: forceFlag }));
+    }
     const setup = await mcpSetup();
     const connected = setup.claudeCode.configured || setup.codex.configured;
     let token = await savedCredential(base);
@@ -555,8 +647,9 @@ async function main() {
       throw new Error(`Not deployed: this folder is linked${as} to the Webly site ${entry.name ? `"${entry.name}" ` : ''}(${entry.websiteId}${entry.url ? `, ${entry.url}` : ''}) in ${projectFile(root)}, ` +
         'and it is not the anonymous site saved on this machine: it was claimed into an account, or the link came from someone else. ' +
         (connected
-          ? `Update it over MCP: get_website ${entry.websiteId}, then deploy_files (a draft; publish_website after the person approves). ` +
-            'If get_website returns 404, the site is not in this account (a fork, another account, or deleted): ask the person whether to make a new site, then `webly link` it.'
+          ? `Update it over MCP: call begin_deploy with websiteId ${entry.websiteId}, then run \`webly deploy ${argument}${entryName === 'default' ? '' : ` --to ${entryName}`} --ticket <ticket>\` with the ticket it returns ` +
+            '(a draft; publish_website after the person approves). Never put an API key in a command or bundle contents in deploy_files. ' +
+            'If begin_deploy returns 404, the site is not in this account (a fork, another account, or deleted): ask the person whether to make a new site, then `webly link` it.'
           : 'Sign in to update it: run `webly connect claude` (or `webly connect codex`), then update it over MCP. If the person has no access to it, ask whether to make a new site, then `webly link` it.'));
     }
     if (!entry && connected && !anonymousFlag) {

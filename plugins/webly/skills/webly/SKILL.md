@@ -147,9 +147,11 @@ update of that site, never a new one. `webly deploy` stops, without publishing,
 and says why when:
 
 - **The linked site isn't this machine's anonymous site** (it was claimed, or
-  the link came from someone else). Update it over MCP. If `get_website` is a
-  404 (a fork, another account, a deleted site), ask the person whether to make
-  a new site; never make one on your own.
+  the link came from someone else). Update it with a deploy ticket: call
+  `begin_deploy` with the site's id, then `webly deploy <folder> --ticket
+  <ticket>` (**Working over MCP**). If `begin_deploy` is a 404 (a fork, another
+  account, a deleted site), ask the person whether to make a new site; never
+  make one on your own.
 - **The folder isn't linked and this machine is connected to an account.**
   Call `list_websites`. If a site's name matches the project, ask "update
   *X*, or make a new site?" (default: update) and never pick between similar
@@ -345,10 +347,20 @@ one. After `create_website` for a project on disk, run `webly link
 <websiteId>` in the project folder so later sessions find it.
 
 1. Framework sites (typed React, the default): `acquire_edit_lease`, then
-   `put_source_file` / `str_replace`. Static sites: `deploy_files` for a few
-   small files; for a folder on disk (a build's `dist/`), call `begin_deploy`
-   and run its `upload.command` with `DIR` set to the folder. Never put a
-   bundle's bytes in a tool call or an API key in a shell command. Each write
+   `put_source_file` / `str_replace`. Static sites: `deploy_files` only for a
+   few small text edits. For a folder on disk (a build's `dist/`, anything with
+   bundles or images), call `begin_deploy` with the site's id and straight away
+   run `webly deploy <folder> --ticket <ticket>` (the ticket lasts 5 minutes and
+   one deploy; never echo it back to the person). The helper builds the project
+   if needed, uploads it (up to 2000 files, 1 MiB each, 100 MiB in all), links
+   the folder and prints the draft URL. Never put a bundle's bytes in a tool
+   call or an API key in a shell command. If it stops with **`would_revert`**,
+   the deploy would undo changes made to the site since this folder last
+   deployed it (the paths are listed): read them with `read_source_files`,
+   merge them into the local project, rebuild, and deploy again with a new
+   ticket; or tell the person what would be undone and, only with their OK,
+   deploy with a new ticket and `--force`. If the result has `replaced`, tell
+   the person the site had changed elsewhere and earlier versions are kept. Each write
    makes a new draft version; the live site doesn't change. Writes are
    Prettier-formatted, so copy `str_replace` text from `read_source_file`.
 2. `check_head` runs the quality gate (lint, typecheck, bundle, render). Fix
