@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.9.1';
+export const VERSION = '0.9.2';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -772,7 +772,7 @@ async function uploadFiles(base, token, paths, { folder, name, failed }) {
     // A batch holds up to 1000 files; a bigger folder goes up in several, all into the same folder.
     for (let i = 0; i < files.length; i += 1000) {
       const chunk = files.slice(i, i + 1000);
-      const out = await uploadBatch(base, token, site, folder ?? first?.folder, chunk, errors, failed);
+      const out = await uploadBatch(base, token, site, first?.folder ?? folder, chunk, errors, failed);
       first ??= out.begun;
       results.push(...out.files);
     }

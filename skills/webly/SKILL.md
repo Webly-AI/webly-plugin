@@ -184,7 +184,9 @@ photos) rather than publish a site:
    or **one folder link** (a page listing every file with *Download all*
    as .zip). Both come back either way; you only choose what to show.
 2. Without an account: `webly upload <file|folder>… [--folder name]`. It prints
-   each file's link, the `folderUrl` and the `zipUrl`. A folder keeps its
+   each file's link, the `folderUrl` and the `zipUrl`. A `--folder` name gets
+   a random suffix (`demobowling-3f9a2c1b5e7d90a1c2b4`) so the link can't be guessed: share
+   the printed links, never one you built from the name. A folder keeps its
    subfolders and hidden files (`src/main.cpp`, `.gitignore`); only `.DS_Store` is left out. Over 500 files it uploads them as one zip archive, served as a folder. Every
    run is a new folder with its own links, so there is no limit on links: only
    500 MiB in total per machine, **the website included** (`status` shows
