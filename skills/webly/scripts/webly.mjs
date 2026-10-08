@@ -1,17 +1,17 @@
 #!/usr/bin/env node
 /** Webly agent helper: anonymous deploys, local state for new sessions, and MCP setup. Zero dependencies. */
 import { mkdir, readFile, writeFile, readdir, open, link, unlink, lstat, stat, rm, rename, realpath } from 'node:fs/promises';
-import { realpathSync } from 'node:fs';
+import { createReadStream, openAsBlob, realpathSync } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.9.2';
+export const VERSION = '0.10.1';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -45,7 +45,8 @@ const USAGE = `Usage: webly.mjs <command>
   deploy <dir|file> --ticket T [--to E] [--force]
                               Signed in: upload the folder to a static site with the ticket from the begin_deploy MCP tool
                               (5 minutes, one deploy). Makes a draft; publish_website after the person approves. Up to 2000
-                              files, 1 MiB each, 100 MiB in all. Refuses (would_revert) if it would undo changes made to the
+                              files; those up to 1 MiB go in one request of up to 100 MiB, bigger ones (images, video)
+                              straight to storage, up to the plan's per-file limit and counted toward its storage. Refuses (would_revert) if it would undo changes made to the
                               site since this folder's last deploy; --force replaces them anyway, only with the person's OK
   link <websiteId> [--as E]   Link the project in this folder to a site (entry E, default "default") in .webly/project.json
   replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only); relinks the folder
@@ -204,27 +205,81 @@ export function ticketClaims(ticket) {
   throw new Error('That is not a deploy ticket: pass the `ticket` that begin_deploy returned (wd_…).');
 }
 
+/** A file's SHA-256 in hex, read in chunks so a large video never sits in memory. */
+const sha256Of = (abs) => new Promise((ok, fail) => {
+  const hash = createHash('sha256');
+  createReadStream(abs).on('data', (chunk) => hash.update(chunk)).on('error', fail).on('end', () => ok(hash.digest('hex')));
+});
+
 /**
- * The multipart upload for a signed-in static site, under the server's limits: 1 MiB per file,
- * MAX_TICKET_FILES files, MAX_TICKET_BYTES in all. Over any of them, nothing is sent.
+ * The multipart upload for a signed-in static site, under the server's limits: MAX_TICKET_FILES
+ * files and MAX_TICKET_BYTES in all. Files over 1 MiB (images, video) aren't in it: they're
+ * returned as `large` to go straight to storage (uploadLarge). Over a limit, nothing is sent.
  */
 export async function ticketForm(target, fields = {}) {
   const info = await stat(target);
   const found = await siteFiles(target, info);
   if (found.length > MAX_TICKET_FILES) throw new Error(`${found.length} files found; a deploy takes at most ${MAX_TICKET_FILES}. Nothing was sent.`);
   const form = new FormData();
+  const large = [];
   // Each part's multipart header counts too: the server caps the whole request.
   let total = 0;
   for (const { path, abs } of found) {
+    const { size } = await stat(abs);
+    if (size > MAX_FILE_BYTES) { large.push({ path, abs, size, sha256: await sha256Of(abs) }); continue; }
     const bytes = await readFile(abs);
-    if (bytes.length > MAX_FILE_BYTES) throw new Error(`${path} is larger than 1 MiB, the per-file limit. Nothing was sent.`);
     total += bytes.length + path.length + 256;
     if (total > MAX_TICKET_BYTES) throw new Error(`The files add up to more than ${MAX_TICKET_BYTES / 1024 / 1024} MiB, the per-deploy limit. Nothing was sent.`);
     // No type: the server sets it from the path.
     form.append('files', new Blob([bytes]), path.slice(1));
   }
   for (const [key, value] of Object.entries(fields)) if (value !== undefined) form.append(key, String(value));
-  return { form, count: found.length };
+  return { form, count: found.length, large };
+}
+
+/**
+ * Files over 1 MiB go straight to storage: the server counts them toward the plan (or refuses,
+ * before any byte moves), returns an upload URL for each it doesn't already have, and a ticket
+ * that outlasts the uploads. Returns that ticket and the `uploaded` list for the deploy.
+ */
+async function uploadLarge(base, ticket, large) {
+  const response = await fetch(`${base}/public/v1/deploys/uploads`, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
+    headers: { Authorization: `Bearer ${ticket}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ files: large.map(({ path, size, sha256 }) => ({ path, size, sha256 })) }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const d = result.details ?? {};
+    if (response.status === 401) throw new Error('Not deployed: the ticket is invalid or expired (they last 5 minutes and work once). Get a new one with begin_deploy and run this again straight away.');
+    if (d.reason === 'storage_limit') throw new Error(`Not deployed: ${result.message}`);
+    if (d.reason === 'file_too_large') throw new Error(`Not deployed: ${d.file} is larger than this plan's ${Math.floor(d.limit / 1024 / 1024)} MiB per-file limit. Nothing was sent.`);
+    throw new Error(`Not deployed: ${result.message || `request failed (${response.status})`}${d.reason ? ` [${d.reason}]` : ''}`);
+  }
+  const byPath = new Map(large.map((f) => [f.path.replace(/^\/+/, ''), f]));
+  // One PUT per file, or per part for files over 100 MiB (only the parts R2 doesn't have yet, so a rerun resumes).
+  const jobs = [];
+  for (const { path, upload, parts, partSize } of result.files) {
+    const file = byPath.get(path.replace(/^\/+/, ''));
+    if (upload) jobs.push({ label: path, url: upload.url, headers: Object.fromEntries(Object.entries(upload.headers).filter(([k]) => k.toLowerCase() !== 'content-length')), body: () => openAsBlob(file.abs) });
+    for (const part of parts ?? []) {
+      const start = (part.partNumber - 1) * partSize;
+      jobs.push({ label: `${path} (part ${part.partNumber})`, url: part.url, headers: {}, body: async () => (await openAsBlob(file.abs)).slice(start, start + part.size) });
+    }
+  }
+  // Two at a time, and each one retried on its own: connection resets happen on big uploads.
+  const putOne = async (job) => {
+    for (let attempt = 1; ; attempt++) {
+      const put = await fetch(job.url, { method: 'PUT', headers: job.headers, body: await job.body() }).catch((error) => ({ ok: false, status: error.message }));
+      if (put.ok) return;
+      // Network errors, timeouts, rate limits and 5xx pass; a 4xx (expired URL, bad signature, hash mismatch) won't.
+      const transient = typeof put.status !== 'number' || put.status === 408 || put.status === 429 || put.status >= 500;
+      if (attempt === 3 || !transient) throw new Error(`Not deployed: uploading ${job.label} failed (${put.status}). Run the deploy again with a new ticket from begin_deploy; what already uploaded won't be sent again.`);
+      await new Promise((r) => setTimeout(r, attempt * 2000));
+    }
+  };
+  for (let i = 0; i < jobs.length; i += 2) await Promise.all(jobs.slice(i, i + 2).map(putOne));
+  return { ticket: result.ticket, uploaded: result.files.map(({ path, size, hash }) => ({ path, size, sha256: hash })) };
 }
 
 /** A folder, a single file, or a ready-made payload.json becomes an anonymous site body. */
@@ -414,10 +469,16 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
   // The base is only meaningful for deploys from this same project folder.
   const last = await lastDeploy(websiteId);
   const baseVersion = !force && last?.path === root ? last.version : undefined;
-  const { form, count } = await ticketForm(target, { baseVersion, force: force || undefined });
+  const { form, count, large } = await ticketForm(target, { baseVersion, force: force || undefined });
+  let deployTicket = ticket;
+  if (large.length) {
+    const sent = await uploadLarge(base, ticket, large);
+    deployTicket = sent.ticket;
+    form.append('uploaded', JSON.stringify(sent.uploaded));
+  }
   const response = await fetch(`${base}/public/v1/deploys`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
-    headers: { Authorization: `Bearer ${ticket}` }, body: form,
+    headers: { Authorization: `Bearer ${deployTicket}` }, body: form,
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {

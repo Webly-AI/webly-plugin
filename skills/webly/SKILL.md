@@ -354,7 +354,8 @@ one. After `create_website` for a project on disk, run `webly link
    bundles or images), call `begin_deploy` with the site's id and straight away
    run `webly deploy <folder> --ticket <ticket>` (the ticket lasts 5 minutes and
    one deploy; never echo it back to the person). The helper builds the project
-   if needed, uploads it (up to 2000 files, 1 MiB each, 100 MiB in all), links
+   if needed, uploads it (up to 2000 files; images and video over 1 MiB go
+   straight to storage, up to the plan's per-file limit), links
    the folder and prints the draft URL. Never put a bundle's bytes in a tool
    call or an API key in a shell command. If it stops with **`would_revert`**,
    the deploy would undo changes made to the site since this folder last
@@ -383,7 +384,9 @@ address the site answers at. `rename_vanity`
 changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
 handle the namespace. Renames are scarce (Base 1, Max 5, lifetime), so rename
 only to the exact name the person asked for, and tell them old vanity addresses
-stop working. On `402`, give them `details.upgradeUrl`.
+stop working. The new addresses need about a minute for HTTPS: check
+`get_namespace` until `certificate` is `active`, then tell them they're live.
+On `402`, give them `details.upgradeUrl`.
 
 New content, including blog posts and repeating content (products, team, FAQs),
 goes in the site's source files; don't create collections or blog posts, the CMS
