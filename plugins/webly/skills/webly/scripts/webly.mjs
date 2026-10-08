@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.10.1';
+export const VERSION = '0.10.2';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -206,10 +206,19 @@ export function ticketClaims(ticket) {
 }
 
 /** A file's SHA-256 in hex, read in chunks so a large video never sits in memory. */
-const sha256Of = (abs) => new Promise((ok, fail) => {
+const sha256Of = (abs, range = {}) => new Promise((ok, fail) => {
   const hash = createHash('sha256');
-  createReadStream(abs).on('data', (chunk) => hash.update(chunk)).on('error', fail).on('end', () => ok(hash.digest('hex')));
+  createReadStream(abs, range).on('data', (chunk) => hash.update(chunk)).on('error', fail).on('end', () => ok(hash.digest('hex')));
 });
+
+/** What a file over SITE_PART_SIZE goes up in: each part's SHA-256, and the file's fingerprint (the SHA-256 of those digests). */
+const SITE_PART_SIZE = 100 * 1024 * 1024;
+async function fingerprint(abs, size) {
+  if (size <= SITE_PART_SIZE) return { sha256: await sha256Of(abs) };
+  const partSha256 = [];
+  for (let at = 0; at < size; at += SITE_PART_SIZE) partSha256.push(await sha256Of(abs, { start: at, end: Math.min(at + SITE_PART_SIZE, size) - 1 }));
+  return { sha256: createHash('sha256').update(Buffer.concat(partSha256.map((h) => Buffer.from(h, 'hex')))).digest('hex'), partSha256 };
+}
 
 /**
  * The multipart upload for a signed-in static site, under the server's limits: MAX_TICKET_FILES
@@ -226,7 +235,7 @@ export async function ticketForm(target, fields = {}) {
   let total = 0;
   for (const { path, abs } of found) {
     const { size } = await stat(abs);
-    if (size > MAX_FILE_BYTES) { large.push({ path, abs, size, sha256: await sha256Of(abs) }); continue; }
+    if (size > MAX_FILE_BYTES) { large.push({ path, abs, size, ...await fingerprint(abs, size) }); continue; }
     const bytes = await readFile(abs);
     total += bytes.length + path.length + 256;
     if (total > MAX_TICKET_BYTES) throw new Error(`The files add up to more than ${MAX_TICKET_BYTES / 1024 / 1024} MiB, the per-deploy limit. Nothing was sent.`);
@@ -246,7 +255,7 @@ async function uploadLarge(base, ticket, large) {
   const response = await fetch(`${base}/public/v1/deploys/uploads`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
     headers: { Authorization: `Bearer ${ticket}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ files: large.map(({ path, size, sha256 }) => ({ path, size, sha256 })) }),
+    body: JSON.stringify({ files: large.map(({ path, size, sha256, partSha256 }) => ({ path, size, sha256, ...(partSha256 && { partSha256 }) })) }),
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -264,7 +273,8 @@ async function uploadLarge(base, ticket, large) {
     if (upload) jobs.push({ label: path, url: upload.url, headers: Object.fromEntries(Object.entries(upload.headers).filter(([k]) => k.toLowerCase() !== 'content-length')), body: () => openAsBlob(file.abs) });
     for (const part of parts ?? []) {
       const start = (part.partNumber - 1) * partSize;
-      jobs.push({ label: `${path} (part ${part.partNumber})`, url: part.url, headers: {}, body: async () => (await openAsBlob(file.abs)).slice(start, start + part.size) });
+      // Each part's checksum header: storage refuses bytes that don't match it.
+      jobs.push({ label: `${path} (part ${part.partNumber})`, url: part.url, headers: part.headers ?? {}, body: async () => (await openAsBlob(file.abs)).slice(start, start + part.size) });
     }
   }
   // Two at a time, and each one retried on its own: connection resets happen on big uploads.
