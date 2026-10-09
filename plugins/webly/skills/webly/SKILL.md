@@ -413,7 +413,10 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    - **`example.com` directly.** Only if their DNS provider supports CNAME
      flattening or ALIAS at the root (Cloudflare, Namecheap, Porkbun…).
    For a subdomain such as `shop.example.com`, just add it.
-3. Call `add_domain`. Give the person the required `dns.records` **exactly as
+3. Call `add_domain`, then `connect_domain`. If it returns a `url`, give the
+   person that link first: they sign in at their DNS provider (e.g. GoDaddy)
+   and approve, and the provider sets the records (and the www forwarding).
+   Otherwise, or as the fallback, give the required `dns.records` **exactly as
    returned**, as a Type / Name / Value table. For a www domain, also give the
    `apexForward` forwarding rule. Provider tips:
    - Type only the Name shown (`www`, or `@` for the root). GoDaddy and
