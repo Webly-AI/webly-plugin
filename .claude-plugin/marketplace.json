@@ -6,7 +6,7 @@
     "url": "https://webly.ai"
   },
   "description": "Webly — the website API for AI agents",
-  "version": "0.10.6",
+  "version": "0.10.7",
   "plugins": [
     {
       "name": "webly",

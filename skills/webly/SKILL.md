@@ -453,7 +453,11 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    address redirects to it; if another domain is already main, offer
    `set_primary_domain` to switch. If it's
    `failed`, relay `failureMessage`, have them fix the record, then call
-   `verify_domain` again.
+   `verify_domain` again. If the domain is active but their browser says the
+   server "could not be found" right after removing and re-adding it, their
+   DNS cached the gap: it clears within the zone's negative-cache time (30
+   minutes by default on Cloudflare), or sooner if they flush their DNS cache and
+   the stale answer was cached on their device (not by their router or ISP).
 
 Adding a domain publishes nothing and takes nothing offline. The
 `*.webly.site` address keeps working.
