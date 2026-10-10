@@ -414,8 +414,14 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
      flattening or ALIAS at the root (Cloudflare, Namecheap, Porkbun…).
    For a subdomain such as `shop.example.com`, just add it.
 3. Call `add_domain`, then `connect_domain`. If it returns a `url`, give the
-   person that link first: they sign in at their DNS provider (e.g. GoDaddy)
-   and approve, and the provider sets the records (and the www forwarding).
+   person that link first: they sign in at their DNS provider (Cloudflare for
+   any hostname; GoDaddy and others for www once they support it) and approve,
+   and the records are set for them. They open it in the browser where they
+   use Webly. With Cloudflare (`method: "oauth"`) Webly doesn't set the
+   bare-domain forward, so for a www domain still give them `apexForward`; it
+   also switches the hostname at once: if it already serves a live site, warn them it may be unreachable for
+   a few minutes, and offer the manual records (TXT first) to move without
+   downtime.
    Otherwise, or as the fallback, give the required `dns.records` **exactly as
    returned**, as a Type / Name / Value table. For a www domain, also give the
    `apexForward` forwarding rule. Provider tips:
