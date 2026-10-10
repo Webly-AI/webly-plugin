@@ -417,9 +417,10 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    person that link first: they sign in at their DNS provider (Cloudflare for
    any hostname; GoDaddy and others for www once they support it) and approve,
    and the records are set for them. They open it in the browser where they
-   use Webly. With Cloudflare (`method: "oauth"`) Webly doesn't set the
-   bare-domain forward, so for a www domain still give them `apexForward`; it
-   also switches the hostname at once: if it already serves a live site, warn them it may be unreachable for
+   use Webly. With Cloudflare (`method: "oauth"`) Webly also forwards the
+   bare domain of a www domain if they allow redirects on Cloudflare's screen
+   and nothing is served there yet (if `apexForward` isn't ok after
+   verifying, give it to them); it also switches the hostname at once: if it already serves a live site, warn them it may be unreachable for
    a few minutes, and offer the manual records (TXT first) to move without
    downtime.
    Otherwise, or as the fallback, give the required `dns.records` **exactly as
