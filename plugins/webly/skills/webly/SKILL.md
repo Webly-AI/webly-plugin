@@ -420,9 +420,12 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    use Webly. With Cloudflare (`method: "oauth"`) Webly also forwards the
    bare domain of a www domain if they allow redirects on Cloudflare's screen
    and nothing is served there yet (if `apexForward` isn't ok after
-   verifying, give it to them); it also switches the hostname at once: if it already serves a live site, warn them it may be unreachable for
-   a few minutes, and offer the manual records (TXT first) to move without
-   downtime.
+   verifying, give it to them). If records of theirs are in the way, nothing
+   is replaced until they approve the exact changes shown after signing in;
+   approving switches the hostname at once, so for a site live today offer the
+   manual records (TXT first) to move without downtime. When you
+   `remove_domain` and the response has `dnsCleanup`, ask whether to delete the
+   records Webly added too, and if yes give them `dnsCleanup.url`.
    Otherwise, or as the fallback, give the required `dns.records` **exactly as
    returned**, as a Type / Name / Value table. For a www domain, also give the
    `apexForward` forwarding rule. Provider tips:
@@ -445,8 +448,10 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    Every domain response has `next` with the step (1 DNS record, 2 HTTPS
    certificate, 3 live) and what to do. Tell the person when each step
    completes.
-5. Once live: confirm `https://<hostname>` loads, then offer
-   `set_primary_domain` so every other address redirects to it. If it's
+5. Once live: confirm `https://<hostname>` loads. The first domain to go live
+   on a site becomes its main address by itself (`isPrimary`), and every other
+   address redirects to it; if another domain is already main, offer
+   `set_primary_domain` to switch. If it's
    `failed`, relay `failureMessage`, have them fix the record, then call
    `verify_domain` again.
 
