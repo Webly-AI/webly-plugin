@@ -378,8 +378,9 @@ New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pa
 one is a `409`, not a variant). On Base and Max the workspace also has a namespace
 and each published site answers at `urls.vanity`
 (`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
-within the namespace). Share `urls.primary`: the main address (a custom domain
-when one is live, else the vanity, else the flat address); `urls.all` lists every
+within the namespace). Share `urls.primary`: the primary address (a custom domain
+when one is live, else the vanity, else the flat address, unless the owner chose a
+webly.site address as primary); `urls.all` lists every
 address the site answers at. `rename_vanity`
 changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
 handle the namespace. Renames are scarce (Base 1, Max 5, lifetime), so rename
@@ -449,9 +450,13 @@ Needs a signed-in account (MCP). "Connect example.com to my site":
    certificate, 3 live) and what to do. Tell the person when each step
    completes.
 5. Once live: confirm `https://<hostname>` loads. The first domain to go live
-   on a site becomes its main address by itself (`isPrimary`), and every other
-   address redirects to it; if another domain is already main, offer
-   `set_primary_domain` to switch. If it's
+   on a site becomes its primary address by itself (`isPrimary`), unless a
+   primary was already chosen (another domain, or a webly.site address picked
+   with `set_primary_address`); every other address redirects to the primary.
+   If another domain is already primary, offer
+   `set_primary_domain` to switch, or `set_primary_address` if they want a
+   webly.site address to be the primary (their custom domains then redirect
+   to it; say so). If it's
    `failed`, relay `failureMessage`, have them fix the record, then call
    `verify_domain` again. If the domain is active but their browser says the
    server "could not be found" right after removing and re-adding it, their
