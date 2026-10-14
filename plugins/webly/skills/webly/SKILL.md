@@ -348,8 +348,8 @@ folder's linked one, if `doctor` shows a link) rather than creating a second
 one. After `create_website` for a project on disk, run `webly link
 <websiteId>` in the project folder so later sessions find it.
 
-1. Framework sites (typed React, the default): `acquire_edit_lease`, then
-   `put_source_file` / `str_replace`. Static sites: `deploy_files` only for a
+1. Framework sites (typed React, the default): `put_source_file` /
+   `str_replace` (no lease needed). Static sites: `deploy_files` only for a
    few small text edits. For a folder on disk (a build's `dist/`, anything with
    bundles or images), call `begin_deploy` with the site's id and straight away
    run `webly deploy <folder> --ticket <ticket>` (the ticket lasts 5 minutes and
@@ -399,11 +399,14 @@ Details are in llms.txt.
 `403` names the missing capability in `details.capability`: the grant was
 narrower than the task, so tell them which access level covers it. `401` /
 `invalid_token`: call a Webly tool again to re-trigger sign-in; don't start a
-second attempt while one is waiting. `409 Invalid edit lease`: re-acquire and
-re-read before writing. Send `baseVersion` (the `version` your read returned)
-with `put_source_file` / `delete_source_file`; `409 would_revert` means someone
-changed that file since: read it again, re-apply your change, resend. Publish
-with `version` set to the one the person previewed.
+second attempt while one is waiting. Other people and agents may edit the
+same site at once. Prefer `str_replace` for small edits. Send `baseVersion`
+(the `version` your read returned) with `put_source_file` /
+`delete_source_file`: their edits to other lines are merged with yours;
+`409 merge_conflict` means you both changed the same lines — read the file
+again, re-apply your change keeping theirs, resend with the new version.
+`wait_for_changes` shows what others wrote since a version. Publish with
+`version` set to the one the person previewed.
 
 Git: `get_git_access` gives a read-only clone of a signed-in site's source and
 history (one commit per version). Its token lasts one minute, so run its
