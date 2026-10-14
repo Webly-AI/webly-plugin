@@ -400,7 +400,10 @@ Details are in llms.txt.
 narrower than the task, so tell them which access level covers it. `401` /
 `invalid_token`: call a Webly tool again to re-trigger sign-in; don't start a
 second attempt while one is waiting. `409 Invalid edit lease`: re-acquire and
-re-read before writing.
+re-read before writing. Send `baseVersion` (the `version` your read returned)
+with `put_source_file` / `delete_source_file`; `409 would_revert` means someone
+changed that file since: read it again, re-apply your change, resend. Publish
+with `version` set to the one the person previewed.
 
 ### Custom domains
 
