@@ -405,6 +405,12 @@ with `put_source_file` / `delete_source_file`; `409 would_revert` means someone
 changed that file since: read it again, re-apply your change, resend. Publish
 with `version` set to the one the person previewed.
 
+Git: `get_git_access` gives a read-only clone of a signed-in site's source and
+history (one commit per version). Its token lasts one minute, so run its
+`clone` (or `pull` inside the clone) straight away with `WEBLY_GIT_TOKEN` set in
+the same command, never in the URL. Check `headVersion` with `get_website`
+before asking again. Never `git push`; write through the tools.
+
 ### Custom domains
 
 Needs a signed-in account (MCP). "Connect example.com to my site":
