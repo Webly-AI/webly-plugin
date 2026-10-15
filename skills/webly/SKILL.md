@@ -349,8 +349,9 @@ one. After `create_website` for a project on disk, run `webly link
 <websiteId>` in the project folder so later sessions find it.
 
 1. Framework sites (typed React, the default): `put_source_file` /
-   `str_replace` (no lease needed). Static sites: `deploy_files` only for a
-   few small text edits, with `expectedHeadVersion` set to the version
+   `str_replace` (no lease needed). Static sites: `search_source` and
+   `str_replace` with `{ path, edits }` for small text edits; `deploy_files`
+   only for a few small whole files, with `expectedHeadVersion` set to the version
    `read_source_files` returned (`400 base_required` without it). If someone
    wrote since, your change is merged onto theirs (`merged` in the response);
    `409 merge_conflict` means you both changed the same lines: tell the person
