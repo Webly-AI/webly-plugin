@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.11.3';
+export const VERSION = '0.12.0';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -47,7 +47,9 @@ const USAGE = `Usage: webly.mjs <command>
                               (5 minutes, one deploy). Makes a draft; publish_website after the person approves. Up to 2000
                               files; those up to 1 MiB go in one request of up to 100 MiB, bigger ones (images, video)
                               straight to storage, up to the plan's per-file limit and counted toward its storage. Refuses (would_revert) if it would undo changes made to the
-                              site since this folder's last deploy; --force replaces them anyway, only with the person's OK
+                              site since this folder's last deploy, or (with no earlier deploy from here) would remove files the folder
+                              lacks (would_remove); --force does it anyway, only with the person's OK. In a clone of the
+                              site's git mirror, files in .webly/media.json are kept and the base comes from git history
   link <websiteId> [--as E]   Link the project in this folder to a site (entry E, default "default") in .webly/project.json
   replace <dir|file|payload.json> [--name N]  Swap the site for a new one with a new URL (first 24 hours only); relinks the folder
   upload <file|dir>... [--folder F] [--name N]   Share files without an account: one link per file plus a folder
@@ -203,6 +205,40 @@ export function ticketClaims(ticket) {
   const m = /^wd_([A-Za-z0-9_-]+)\.\d+\.[A-Za-z0-9_-]+$/.exec(ticket ?? '');
   try { const claims = m && JSON.parse(Buffer.from(m[1], 'base64url').toString()); if (typeof claims?.websiteId === 'string') return claims; } catch {}
   throw new Error('That is not a deploy ticket: pass the `ticket` that begin_deploy returned (wd_…).');
+}
+
+/**
+ * In a git-mirror clone of the site (a remote names its websiteId), the Webly version the checkout
+ * was written from: the newest Webly-Version trailer in its history. Null anywhere else or without git.
+ */
+export function mirrorVersion(dir, websiteId, runner = run) {
+  const remotes = runner('git', ['remote', '-v'], dir);
+  if (!remotes.ok) return null;
+  const name = remotes.output.split('\n').map((l) => l.split(/\s+/)).find(([, url]) => new RegExp(`/${websiteId}(\\.git)?$`).test(url ?? ''))?.[0];
+  if (!name) return null;
+  // Only history this checkout shares with the site's mirror: another branch's trailers aren't this site's versions.
+  const shared = runner('git', ['merge-base', 'HEAD', `refs/remotes/${name}/main`], dir);
+  if (!shared.ok) return null;
+  const log = runner('git', ['log', '-n', '500', '--format=%(trailers:key=Webly-Version,valueonly)', shared.output.trim()], dir);
+  const version = log.ok ? Number(log.output.split('\n').find((line) => line.trim())) : NaN;
+  return Number.isInteger(version) && version > 0 ? version : null;
+}
+
+/**
+ * The files a git-mirror clone lists in .webly/media.json instead of committing (images, video), as
+ * `uploaded` entries: the site already stores them, so the deploy keeps them without sending bytes.
+ * A file at that path in the folder being deployed (`deployed`, e.g. the build output) wins.
+ */
+export async function mirrorMedia(dir, deployed = dir) {
+  const media = await readJson(join(dir, '.webly', 'media.json'));
+  if (!media || typeof media !== 'object' || Array.isArray(media)) return [];
+  const out = [];
+  for (const [path, f] of Object.entries(media)) {
+    if (typeof f?.sha256 !== 'string' || !/^[0-9a-f]{64}$/.test(f.sha256) || !Number.isInteger(f.size) || f.size < 1) continue;
+    if (await stat(join(deployed, ...path.split('/'))).catch(() => null)) continue;
+    out.push({ path: '/' + path.replace(/^\/+/, ''), size: f.size, sha256: f.sha256, ...(typeof f.contentType === 'string' && { contentType: f.contentType }) });
+  }
+  return out;
 }
 
 /** A file's SHA-256 in hex, read in chunks so a large video never sits in memory. */
@@ -475,17 +511,27 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
     throw new Error(`Not deployed: the ticket is for ${websiteId}, but this folder is linked${entryName === 'default' ? '' : ` as "${entryName}"`} to ${entry.websiteId}${entry.name ? ` ("${entry.name}")` : ''} in ${projectFile(root)}. ` +
       `Call begin_deploy with websiteId ${entry.websiteId}, or, if the person wants this folder on the other site, \`webly link ${websiteId}\` first.`);
   }
-  const target = await stat(argument).then(i => i.isDirectory(), () => false) ? await buildIfProject(argument) : argument;
-  // The base is only meaningful for deploys from this same project folder.
+  const isDir = await stat(argument).then(i => i.isDirectory(), () => false);
+  const target = isDir ? await buildIfProject(argument) : argument;
+  // The base is only meaningful for deploys from this same project folder, or from a mirror clone's own history.
   const last = await lastDeploy(websiteId);
-  const baseVersion = !force && last?.path === root ? last.version : undefined;
+  const mirrored = isDir ? mirrorVersion(target, websiteId) : null;
+  const known = Math.max(last?.path === root ? last.version : 0, mirrored ?? 0) || undefined;
+  const baseVersion = force ? undefined : known;
+  const { headVersion } = ticketClaims(ticket);
+  const pull = mirrored ? ' This folder is a git clone of the site: `git pull` brings in the newer versions, then deploy again.' : '';
+  if (mirrored && (known ?? 0) < headVersion) console.error(`Webly: this clone is at version ${known}, the site at ${headVersion}.${pull}`);
+  // media.json sits at the clone's root even when the build output (dist/) is what gets deployed.
+  const media = isDir ? await mirrorMedia(argument, target) : [];
   const { form, count, large } = await ticketForm(target, { baseVersion, force: force || undefined });
   let deployTicket = ticket;
+  const uploaded = [...media];
   if (large.length) {
     const sent = await uploadLarge(base, ticket, large);
     deployTicket = sent.ticket;
-    form.append('uploaded', JSON.stringify(sent.uploaded));
+    uploaded.push(...sent.uploaded);
   }
+  if (uploaded.length) form.append('uploaded', JSON.stringify(uploaded));
   const response = await fetch(`${base}/public/v1/deploys`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
     headers: { Authorization: `Bearer ${deployTicket}` }, body: form,
@@ -496,7 +542,16 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
     if (d.reason === 'would_revert') {
       throw new Error(`Not deployed: this would undo changes made to the site since this folder last deployed it (version ${d.baseVersion}, now ${d.headVersion}): ${(d.paths ?? []).join(', ')}. ` +
         'Read the live files with read_source_files, merge those changes into the local project, rebuild, then get a new ticket with begin_deploy and deploy again. ' +
-        'Or tell the person what would be undone and, only with their OK, deploy again with a new ticket and --force (earlier versions are kept either way).');
+        `Or tell the person what would be undone and, only with their OK, deploy again with a new ticket and --force (earlier versions are kept either way).${pull}`);
+    }
+    if (d.reason === 'would_remove') {
+      throw new Error(`Not deployed: the site has files this folder doesn't, and this deploy would remove them: ${(d.paths ?? []).join(', ')}. ` +
+        'If they should stay, add them to the folder (read_source_files has their content) and deploy again with a new ticket from begin_deploy. ' +
+        `If the folder is the whole site and the person agrees they should go, deploy again with a new ticket and --force (earlier versions are kept either way).${pull}`);
+    }
+    const listed = media.find((f) => f.path === d.file);
+    if (d.reason === 'upload_missing' && listed) {
+      throw new Error(`Not deployed: ${d.file} is listed in .webly/media.json, but the site doesn't store that file (removed since, or the clone is of another site). Put the file in the folder, or remove its entry from .webly/media.json.${pull}`);
     }
     if (response.status === 401) throw new Error('Not deployed: the ticket is invalid or expired (they last 5 minutes and work once). Get a new one with begin_deploy and run this again straight away.');
     if (response.status === 409 && d.expectedHeadVersion !== undefined) throw new Error('Not deployed: the site changed after this ticket was issued. Get a new ticket with begin_deploy and deploy again.');
@@ -508,7 +563,7 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
     if (!entry) console.error(`Webly: linked this folder to ${websiteId} in ${file}; commit it so every clone deploys to the same site.`);
   } catch (error) { console.error(`Webly: deployed, but could not save the folder's link: ${error.message}`); }
   return {
-    websiteId, version: result.version, headVersion: result.headVersion, publishedVersion: result.publishedVersion, files: count, urls: result.urls,
+    websiteId, version: result.version, headVersion: result.headVersion, publishedVersion: result.publishedVersion, files: count + media.length, urls: result.urls,
     // Without a base the server can't tell an edit made elsewhere from this folder's own last deploy.
     ...(result.replaced && baseVersion !== undefined && { replaced: { ...result.replaced, note: `This draft replaced version ${result.replaced.fromVersion}, which was made somewhere else. Tell the person; earlier versions are kept, so it can be rolled back.` } }),
     next: `This is a draft: show the person ${result.urls?.draft ?? 'the draft URL'} and call publish_website only after they approve it.`,

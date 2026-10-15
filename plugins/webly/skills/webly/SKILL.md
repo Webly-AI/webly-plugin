@@ -367,7 +367,12 @@ one. After `create_website` for a project on disk, run `webly link
    deployed it (the paths are listed): read them with `read_source_files`,
    merge them into the local project, rebuild, and deploy again with a new
    ticket; or tell the person what would be undone and, only with their OK,
-   deploy with a new ticket and `--force`. If the result has `replaced`, tell
+   deploy with a new ticket and `--force`. If it stops with **`would_remove`**,
+   the site has files the folder doesn't (listed): add them to the folder, or
+   only with the person's OK deploy with `--force`. A clone of the site's git
+   mirror (`get_git_access`) deploys the same way: the helper keeps the images
+   listed in `.webly/media.json` and takes its base from the git history; when
+   it says the clone is behind, `git pull` first. If the result has `replaced`, tell
    the person the site had changed elsewhere and earlier versions are kept. Each write
    makes a new draft version; the live site doesn't change. Writes are
    Prettier-formatted, so copy `str_replace` text from `read_source_file`.
