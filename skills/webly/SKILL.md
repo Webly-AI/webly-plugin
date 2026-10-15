@@ -201,7 +201,7 @@ photos) rather than publish a site:
    doesn't work: the shell expands `$FILE` first), then
    `finalize_object_upload`. To keep a folder's structure, name each file by
    its path inside it (`src/main.cpp`) and include hidden files (`.gitignore`, `.idea/…`); never flatten a folder or drop its hidden files. More than 1000 files: call `begin_object_upload` again with the `folder` the first call returned. Free keeps files up to 7 days (1 GB, 100 MB per
-   file); Base and Max can keep them forever (25 / 100 GB, 2 GB per file).
+   file); Hobby and Pro can keep them forever (50 / 200 GB, 2 GB per file).
    Never put file bytes in a tool call.
 
 Only images, video, audio, PDF and plain text open in the browser; anything
@@ -216,14 +216,14 @@ Managing shared files over MCP (the dashboard's Files page does the same):
   a link of its own). **Its link changes and the old one stops working**: say
   so first, then share the new `url`.
 - `delete_object` / `delete_folder` delete for good. Confirm first.
-- **Passwords (Base and Max), only when the person asks.** `set_folder_password`
+- **Passwords (Hobby and Pro), only when the person asks.** `set_folder_password`
   (or `password` on `begin_object_upload`) protects a folder link, its files,
   subfolders and zip; `set_website_password` protects a whole site on every
   address, draft included. Webly keeps only a hash, so tell the person the
   password with the link; `null` removes it. On `402 plan_required`, give them
   `details.upgradeUrl`.
 - `email_link` emails a folder or file link (or a site's published or draft link) to
-  up to 10 people with an optional plain-text message (Base and Max). Webly
+  up to 10 people with an optional plain-text message (Hobby and Pro). Webly
   builds the link; confirm the recipients with the person first. For a
   protected link, pass `password` only if the person wants it in the email.
 - **Big folders (more than 500 files): upload one zip as an archive.** Zip the
@@ -242,7 +242,7 @@ Managing shared files over MCP (the dashboard's Files page does the same):
   hour: unfinished uploads are cleared after an hour with no activity.
 - `list_uploads_in_progress` shows unfinished uploads and their progress;
   `clear_uploads_in_progress` cancels them to free the in-flight allowance
-  (Free 1 GB, Base 5 GB, Max 10 GB). Ask first.
+  (Free 1 GB, Hobby 5 GB, Pro 10 GB). Ask first.
 - Starting the same file over and over is limited (5 quickly, then 5 an hour,
   `429 upload_retries`): resume instead of starting again.
 - `get_billing` shows `storage.used` (finished files, including site assets)
@@ -389,7 +389,7 @@ one. After `create_website` for a project on disk, run `webly link
 
 New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pass
 `subdomain` unless the person asks for a specific one (up to 56 characters; a taken
-one is a `409`, not a variant). On Base and Max the workspace also has a namespace
+one is a `409`, not a variant). On Hobby and Pro the workspace also has a namespace
 and each published site answers at `urls.vanity`
 (`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
 within the namespace). Share `urls.primary`: the primary address (a custom domain
@@ -397,7 +397,7 @@ when one is live, else the vanity, else the flat address, unless the owner chose
 webly.site address as primary); `urls.all` lists every
 address the site answers at. `rename_vanity`
 changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
-handle the namespace. Renames are scarce (Base 1, Max 5, lifetime), so rename
+handle the namespace. Renames are scarce (Hobby 5, Pro 10, lifetime), so rename
 only to the exact name the person asked for, and tell them old vanity addresses
 stop working. The new addresses need about a minute for HTTPS: check
 `get_namespace` until `certificate` is `active`, then tell them they're live.
