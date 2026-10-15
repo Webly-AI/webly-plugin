@@ -427,8 +427,8 @@ Publishing an older version puts nothing new live, and `alsoPublishes` is empty.
 
 Git: `get_git_access` gives a read-only clone of a signed-in site's source and
 history (one commit per version). Its token lasts one minute, so run its
-`clone` (or `pull` inside the clone) straight away with `WEBLY_GIT_TOKEN` set in
-the same command, never in the URL. Check `headVersion` with `get_website`
+`clone` (or `pull` inside the clone) straight away as
+`WEBLY_GIT_TOKEN=<token> <clone>`, never with the token in the URL. Check `headVersion` with `get_website`
 before asking again. Never `git push`; write through the tools.
 
 ### Custom domains
