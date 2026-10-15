@@ -409,6 +409,8 @@ is deprecated. A site that already reads collections or a managed blog keeps
 using those tools for that content until the owner asks to move it. Forms
 post with `formAction('name')`, never `mailto:`, and never ask for card
 numbers, passwords, ID numbers or health details (submissions are plain text).
+If the owner wants an email per submission, turn it on with
+`set_form_notifications` (off by default).
 Details are in llms.txt.
 
 `403` names the missing capability in `details.capability`: the grant was
