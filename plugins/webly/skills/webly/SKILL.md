@@ -357,8 +357,11 @@ one. After `create_website` for a project on disk, run `webly link
    whose change it is (`theirsBy`), re-read, re-apply, resend. `force` only
    when the person asks. For a folder on disk (a build's `dist/`, anything with
    bundles or images), call `begin_deploy` with the site's id and straight away
-   run `webly deploy <folder> --ticket <ticket>` (the ticket lasts 5 minutes and
-   one deploy; never echo it back to the person). The helper builds the project
+   run `webly deploy <folder> --ticket <ticket> --message "<what changed>"` (the
+   ticket lasts 5 minutes and one deploy; never echo it back to the person). The
+   message is one line saying what changed ("Button reads Start here"); the
+   site's History shows it, so the people sharing the site can tell your
+   version from everyone else's. The helper builds the project
    if needed, uploads it (up to 2000 files; images and video over 1 MiB go
    straight to storage, up to the plan's per-file limit), links
    the folder and prints the draft URL. Never put a bundle's bytes in a tool

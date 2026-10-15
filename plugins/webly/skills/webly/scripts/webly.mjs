@@ -11,7 +11,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.12.1';
+export const VERSION = '0.12.2';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -42,9 +42,10 @@ const USAGE = `Usage: webly.mjs <command>
                               replace --anonymous discards that). Edits made to the site elsewhere since this
                               machine's last deploy are replaced and reported as "replaced". A project with a package.json
                               build script is built first and its output folder deployed.
-  deploy <dir|file> --ticket T [--to E] [--force]
+  deploy <dir|file> --ticket T [--message M] [--to E] [--force]
                               Signed in: upload the folder to a static site with the ticket from the begin_deploy MCP tool
-                              (5 minutes, one deploy). Makes a draft; publish_website after the person approves. Up to 2000
+                              (5 minutes, one deploy). Makes a draft; publish_website after the person approves. --message
+                              says what changed in one line ("Button reads Start here"); the site's History shows it. Up to 2000
                               files; those up to 1 MiB go in one request of up to 100 MiB, bigger ones (images, video)
                               straight to storage, up to the plan's per-file limit and counted toward its storage. Refuses (would_revert) if it would undo changes made to the
                               site since this folder's last deploy, or (with no earlier deploy from here) would remove files the folder
@@ -504,7 +505,7 @@ function run(cmd, args, cwd) {
  * Deploy a folder to a signed-in static site with a ticket from begin_deploy: the bytes go straight
  * to Webly from here, never through a tool call, and no API key is involved. The result is a draft.
  */
-async function ticketDeploy(base, { command, argument, root, entryName, entry, ticket, force }) {
+async function ticketDeploy(base, { command, argument, root, entryName, entry, ticket, force, message }) {
   if (command !== 'deploy') throw new Error(`--ticket works with deploy, not ${command}.`);
   const { websiteId } = ticketClaims(ticket);
   if (entry && entry.websiteId !== websiteId) {
@@ -523,7 +524,7 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
   if (mirrored && (known ?? 0) < headVersion) console.error(`Webly: this clone is at version ${known}, the site at ${headVersion}.${pull}`);
   // media.json sits at the clone's root even when the build output (dist/) is what gets deployed.
   const media = isDir ? await mirrorMedia(argument, target) : [];
-  const { form, count, large } = await ticketForm(target, { baseVersion, force: force || undefined });
+  const { form, count, large } = await ticketForm(target, { baseVersion, force: force || undefined, message: message || undefined });
   let deployTicket = ticket;
   const uploaded = [...media];
   if (large.length) {
@@ -581,7 +582,7 @@ async function main() {
   const folderFlag = folderAt === -1 ? undefined : argv.splice(folderAt, 2)[1];
   const option = (flag) => { const at = argv.indexOf(flag); return at === -1 ? undefined : argv.splice(at, 2)[1]; };
   const toggle = (flag) => { const at = argv.indexOf(flag); if (at !== -1) argv.splice(at, 1); return at !== -1; };
-  const toFlag = option('--to'), asFlag = option('--as'), ticketFlag = option('--ticket'), anonymousFlag = toggle('--anonymous'), forceFlag = toggle('--force');
+  const toFlag = option('--to'), asFlag = option('--as'), ticketFlag = option('--ticket'), messageFlag = option('--message'), anonymousFlag = toggle('--anonymous'), forceFlag = toggle('--force');
   const [command, argument, extra] = argv;
   const print = (value) => console.log(typeof value === 'string' ? value : JSON.stringify(value, null, 2));
   const readPending = async () => (await readFile(PENDING_FILE, 'utf8').catch(() => '')).trim() || null;
@@ -754,7 +755,7 @@ async function main() {
     const entry = (await readProject(root)).sites[entryName];
     if (ticketFlag !== undefined) {
       if (anonymousFlag) throw new Error('--ticket deploys to the signed-in site the ticket names; --anonymous makes a throwaway anonymous one. Pass one, not both.');
-      return print(await ticketDeploy(base, { command, argument, root, entryName, entry, ticket: ticketFlag, force: forceFlag }));
+      return print(await ticketDeploy(base, { command, argument, root, entryName, entry, ticket: ticketFlag, force: forceFlag, message: messageFlag }));
     }
     const setup = await mcpSetup();
     const connected = setup.claudeCode.configured || setup.codex.configured;
