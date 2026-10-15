@@ -407,7 +407,8 @@ New content, including blog posts and repeating content (products, team, FAQs),
 goes in the site's source files; don't create collections or blog posts, the CMS
 is deprecated. A site that already reads collections or a managed blog keeps
 using those tools for that content until the owner asks to move it. Forms
-post with `formAction('name')`, never `mailto:`.
+post with `formAction('name')`, never `mailto:`, and never ask for card
+numbers, passwords, ID numbers or health details (submissions are plain text).
 Details are in llms.txt.
 
 `403` names the missing capability in `details.capability`: the grant was
