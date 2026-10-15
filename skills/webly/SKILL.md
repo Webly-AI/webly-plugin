@@ -351,9 +351,11 @@ one. After `create_website` for a project on disk, run `webly link
 1. Framework sites (typed React, the default): `put_source_file` /
    `str_replace` (no lease needed). Static sites: `deploy_files` only for a
    few small text edits, with `expectedHeadVersion` set to the version
-   `read_source_files` returned (`400 base_required` without it; `409` if
-   someone wrote since: re-read, re-apply, resend; `force` only when the person
-   asks). For a folder on disk (a build's `dist/`, anything with
+   `read_source_files` returned (`400 base_required` without it). If someone
+   wrote since, your change is merged onto theirs (`merged` in the response);
+   `409 merge_conflict` means you both changed the same lines: tell the person
+   whose change it is (`theirsBy`), re-read, re-apply, resend. `force` only
+   when the person asks. For a folder on disk (a build's `dist/`, anything with
    bundles or images), call `begin_deploy` with the site's id and straight away
    run `webly deploy <folder> --ticket <ticket>` (the ticket lasts 5 minutes and
    one deploy; never echo it back to the person). The helper builds the project
