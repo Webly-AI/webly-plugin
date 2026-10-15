@@ -416,7 +416,11 @@ same site at once. Prefer `str_replace` for small edits. Send `baseVersion`
 `409 merge_conflict` means you both changed the same lines — read the file
 again, re-apply your change keeping theirs, resend with the new version.
 `wait_for_changes` shows what others wrote since a version. Publish with
-`version` set to the one the person previewed.
+`version` set to the one the person previewed. History is linear, so the
+versions between the last publish and that one go live with it (newer ones stay
+unpublished); the response's `alsoPublishes` lists the ones other people or
+agents wrote (who, app, message). Tell your person what of theirs went live.
+Publishing an older version puts nothing new live, and `alsoPublishes` is empty.
 
 Git: `get_git_access` gives a read-only clone of a signed-in site's source and
 history (one commit per version). Its token lasts one minute, so run its
