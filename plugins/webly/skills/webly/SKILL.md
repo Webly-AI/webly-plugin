@@ -385,6 +385,9 @@ one. After `create_website` for a project on disk, run `webly link
 3. Show the person the draft URL (`https://draft--{subdomain}.webly.site`, not
    public, not indexed).
 4. `publish_website` only after they say yes to that exact site and version.
+   It waits for a running build; `202` with `status: "building"` means Webly is
+   still building (not a failure): publish that version again in about 15
+   seconds, and tell the person it's still building.
    `rollback_website` / `unpublish_website` if something is wrong live.
 
 New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pass
