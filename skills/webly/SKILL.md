@@ -406,6 +406,11 @@ stop working. The new addresses need about a minute for HTTPS: check
 `get_namespace` until `certificate` is `active`, then tell them they're live.
 On `402`, give them `details.upgradeUrl`.
 
+A team workspace has one owner (`whoami` → `owner`). Ownership of the workspace
+itself (not moving a website) changes only in the dashboard's People page, by the
+owner; you can't do it, so send them there. The card and subscription stay with
+the workspace.
+
 New content, including blog posts and repeating content (products, team, FAQs),
 goes in the site's source files; don't create collections or blog posts, the CMS
 is deprecated. A site that already reads collections or a managed blog keeps
