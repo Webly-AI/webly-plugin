@@ -443,6 +443,21 @@ history (one commit per version). Its token lasts one minute, so run its
 `WEBLY_GIT_TOKEN=<token> <clone>`, never with the token in the URL. Check `headVersion` with `get_website`
 before asking again. Never `git push`; write through the tools.
 
+### Duplicate or move a site
+
+Hobby and Pro, in both workspaces (`402 plan_required` otherwise: give the
+person `details.upgradeUrl`). `duplicate_website` copies a site 1:1: every
+version, media, CMS, form submissions and settings, passwords; it is published
+if the original is, gets its own addresses, and custom domains stay with the
+original. `move_website` moves a site into another workspace your person
+admins, at once: everything comes along, it gets a **new** webly.site address
+there and the old one stops working, so confirm first and share the new
+`urls.primary`. `list_move_destinations` lists the workspaces your person
+admins and whether the site fits (`reason`: `site_limit`, `storage_limit`,
+`plan_required`); ask which one. Both need a signed-in person (OAuth) to reach
+another workspace. For someone else's workspace, `start_website_transfer`
+returns a code their admin redeems with `accept_website_transfer`.
+
 ### Custom domains
 
 Needs a signed-in account (MCP). "Connect example.com to my site":
