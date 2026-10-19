@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** Webly agent helper: anonymous deploys, local state for new sessions, and MCP setup. Zero dependencies. */
 import { mkdir, readFile, writeFile, readdir, open, link, unlink, lstat, stat, rm, rename, realpath } from 'node:fs/promises';
-import { createReadStream, openAsBlob, realpathSync } from 'node:fs';
+import * as fs from 'node:fs';
+import { createReadStream, realpathSync } from 'node:fs';
 import { isUtf8 } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
@@ -11,7 +12,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.12.11';
+export const VERSION = '0.12.12';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -303,15 +304,25 @@ async function uploadLarge(base, ticket, large) {
     throw new Error(`Not deployed: ${result.message || `request failed (${response.status})`}${d.reason ? ` [${d.reason}]` : ''}`);
   }
   const byPath = new Map(large.map((f) => [f.path.replace(/^\/+/, ''), f]));
+  // Node < 19.8 has no fs.openAsBlob: read just that range into memory (at most one 100 MiB part).
+  const fileBlob = async (abs, start = 0, size) => {
+    if (fs.openAsBlob) return (await fs.openAsBlob(abs)).slice(start, size === undefined ? undefined : start + size);
+    const fh = await open(abs);
+    try {
+      const buf = Buffer.alloc(size ?? (await fh.stat()).size);
+      const { bytesRead } = await fh.read(buf, 0, buf.length, start);
+      return new Blob([buf.subarray(0, bytesRead)]);
+    } finally { await fh.close(); }
+  };
   // One PUT per file, or per part for files over 100 MiB (only the parts R2 doesn't have yet, so a rerun resumes).
   const jobs = [];
   for (const { path, upload, parts, partSize } of result.files) {
     const file = byPath.get(path.replace(/^\/+/, ''));
-    if (upload) jobs.push({ label: path, url: upload.url, headers: Object.fromEntries(Object.entries(upload.headers).filter(([k]) => k.toLowerCase() !== 'content-length')), body: () => openAsBlob(file.abs) });
+    if (upload) jobs.push({ label: path, url: upload.url, headers: Object.fromEntries(Object.entries(upload.headers).filter(([k]) => k.toLowerCase() !== 'content-length')), body: () => fileBlob(file.abs) });
     for (const part of parts ?? []) {
       const start = (part.partNumber - 1) * partSize;
       // Each part's checksum header: storage refuses bytes that don't match it.
-      jobs.push({ label: `${path} (part ${part.partNumber})`, url: part.url, headers: part.headers ?? {}, body: async () => (await openAsBlob(file.abs)).slice(start, start + part.size) });
+      jobs.push({ label: `${path} (part ${part.partNumber})`, url: part.url, headers: part.headers ?? {}, body: () => fileBlob(file.abs, start, part.size) });
     }
   }
   // Two at a time, and each one retried on its own: connection resets happen on big uploads.
