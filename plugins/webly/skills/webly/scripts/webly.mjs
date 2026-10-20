@@ -7,12 +7,13 @@ import { isUtf8 } from 'node:buffer';
 import { spawn, spawnSync } from 'node:child_process';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, extname, join, relative, resolve, sep } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createServer } from 'node:http';
 import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.12.12';
+export const VERSION = '0.13.0';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -23,6 +24,8 @@ const PENDING_FILE = join(dirname(CREDENTIAL_FILE), 'pending');
 const SEEN_FILE = join(dirname(CREDENTIAL_FILE), 'version');
 // The head version each site was at after this machine last deployed it: { websiteId: version }.
 const DEPLOYS_FILE = join(dirname(CREDENTIAL_FILE), 'deploys.json');
+// `webly login`: this machine's OAuth client and refresh token for one API, { api, clientId, refreshToken, accessToken, expiresAt }.
+const LOGIN_FILE = join(dirname(CREDENTIAL_FILE), 'login.json');
 const PLUGIN_MARKETPLACE = 'Webly-AI/webly-plugin';
 // The only server answers that mean the saved secret can never be used again.
 const SPENT = new Set(['credential_consumed', 'credential_expired']);
@@ -65,6 +68,12 @@ const USAGE = `Usage: webly.mjs <command>
   pending set <intent> | clear   Remember a step to finish after a restart (e.g. claim)
   domain-watch <hostname> [--timeout MIN]   Wait for a custom domain to go live: prints each step (dns, https, live),
                               exits 0 once Webly serves it over HTTPS, 1 after the timeout (default 120). Run it in the background
+  login                       Sign in in the browser so \`webly api\` can call the REST API for the person. They pick All my
+                              workspaces or one, and an access level, as when connecting MCP. Saved to ~/.webly/login.json (0600)
+  api <METHOD> <path> [--workspace W] [--data JSON|@file]
+                              Call /v1<path> as the signed-in person and print the JSON (the token never leaves this helper).
+                              --workspace names the workspace (slug) for workspace-wide calls; GET /workspaces lists them
+  logout                      Revoke the sign-in and delete ~/.webly/login.json
   forget                      Delete the saved token only after the API confirms it is spent
   init                        Create the token without deploying
 
@@ -497,7 +506,9 @@ async function openInBrowser(url) {
   const [cmd, ...args] = process.env.WEBLY_OPEN_CMD ? [process.env.WEBLY_OPEN_CMD]
     : process.platform === 'darwin' ? ['open'] : process.platform === 'win32' ? ['cmd', '/c', 'start', '""'] : ['xdg-open'];
   await new Promise((resolve, reject) => {
-    const child = spawn(cmd, [...args, url], { stdio: 'ignore' });
+    // cmd.exe parses the line: an unescaped & would end the command and drop the rest of the URL.
+    const target = cmd === 'cmd' ? url.replace(/[&^]/g, '^$&') : url;
+    const child = spawn(cmd, [...args, target], { stdio: 'ignore' });
     // Child-process errors and output can contain the secret URL. Only report
     // a fixed diagnostic, and keep the saved credential available for retry.
     const failed = () => reject(new Error('Could not open the claim page. Check your browser opener and retry; the saved token was kept.'));
@@ -582,6 +593,131 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
   };
 }
 
+const OAUTH_SCOPES = 'webly:content webly:edit webly:admin offline_access';
+// Registered once per API; the loopback port may differ on every login (RFC 8252 §7.3).
+const LOOPBACK_REDIRECT = 'http://127.0.0.1/callback';
+
+async function saveLogin(data) {
+  await mkdir(dirname(LOGIN_FILE), { recursive: true, mode: 0o700 });
+  const temporary = `${LOGIN_FILE}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
+  await rename(temporary, LOGIN_FILE);
+}
+
+async function oauthToken(base, params) {
+  const response = await fetch(`${base}/api/auth/oauth2/token`, {
+    method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ ...params, resource: `${base}/v1/mcp` }),
+  });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Sign-in failed: ${body.error_description || body.error || response.status}`);
+  return body;
+}
+
+/**
+ * Sign in through the browser: OAuth with PKCE and a loopback redirect, the same login, workspace
+ * and consent screens an MCP client gets. Only the refresh token is kept; nothing is printed.
+ */
+async function login(base) {
+  const saved = await readJson(LOGIN_FILE);
+  let clientId = saved?.api === base ? saved.clientId : null;
+  if (!clientId) {
+    const response = await fetch(`${base}/api/auth/oauth2/register`, {
+      method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000), headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ client_name: 'Webly CLI', application_type: 'native', redirect_uris: [LOOPBACK_REDIRECT], token_endpoint_auth_method: 'none',
+        grant_types: ['authorization_code', 'refresh_token'], response_types: ['code'], scope: OAUTH_SCOPES }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok || !body.client_id) throw new Error(`Could not register with Webly (${body.error_description || response.status})`);
+    clientId = body.client_id;
+  }
+  const verifier = randomBytes(32).toString('base64url');
+  const state = randomBytes(16).toString('base64url');
+  const server = createServer();
+  await new Promise((done, fail) => { server.once('error', fail); server.listen(0, '127.0.0.1', done); });
+  const redirectUri = `http://127.0.0.1:${server.address().port}/callback`;
+  try {
+    const code = new Promise((done, fail) => {
+      const timer = setTimeout(() => fail(new Error('No sign-in within 5 minutes. Run webly login again.')), 300_000);
+      server.on('request', (req, res) => {
+        const url = new URL(req.url, redirectUri);
+        if (url.pathname !== '/callback') { res.writeHead(404).end(); return; }
+        const ok = url.searchParams.get('state') === state && url.searchParams.get('code');
+        res.writeHead(ok ? 200 : 400, { 'Content-Type': 'text/html; charset=utf-8' })
+          .end(ok ? '<p>Signed in to Webly. You can close this tab.</p>' : '<p>Sign-in did not finish. Run webly login again.</p>');
+        clearTimeout(timer);
+        ok ? done(url.searchParams.get('code')) : fail(new Error(`Sign-in did not finish (${url.searchParams.get('error_description') || url.searchParams.get('error') || 'state mismatch'})`));
+      });
+    });
+    const authorize = `${base}/api/auth/oauth2/authorize?${new URLSearchParams({
+      client_id: clientId, redirect_uri: redirectUri, response_type: 'code', scope: OAUTH_SCOPES, resource: `${base}/v1/mcp`, state,
+      code_challenge: createHash('sha256').update(verifier).digest('base64url'), code_challenge_method: 'S256', prompt: 'consent',
+    })}`;
+    await openInBrowser(authorize).catch(() => console.error(`Open this link to sign in:\n${authorize}`));
+    console.error('Waiting for you to finish signing in in the browser…');
+    const tokens = await oauthToken(base, { grant_type: 'authorization_code', code: await code, client_id: clientId, redirect_uri: redirectUri, code_verifier: verifier });
+    await saveLogin({ api: base, clientId, refreshToken: tokens.refresh_token, accessToken: tokens.access_token, expiresAt: Date.now() + tokens.expires_in * 1000 });
+  } finally {
+    server.close();
+  }
+}
+
+/** One refresh at a time across processes: rotating the same refresh token twice revokes the sign-in. */
+async function withLoginLock(fn) {
+  const lock = `${LOGIN_FILE}.lock`;
+  for (let tries = 0; ; tries++) {
+    try { await (await open(lock, 'wx')).close(); break; } catch (error) {
+      if (error.code !== 'EEXIST') throw error;
+      // ponytail: a lock older than 30 s was left by a crashed process.
+      const age = Date.now() - ((await stat(lock).catch(() => null))?.mtimeMs ?? Date.now());
+      if (age > 30_000) await unlink(lock).catch(() => {});
+      else if (tries > 300) throw new Error('Another webly command is refreshing the sign-in; try again.');
+      else await new Promise(done => setTimeout(done, 100));
+    }
+  }
+  try { return await fn(); } finally { await unlink(lock).catch(() => {}); }
+}
+
+/**
+ * A fresh access token for the saved sign-in. Refreshes (saving the rotated refresh token) when it is
+ * due or when `stale` was just refused, under a lock, reusing what another process refreshed meanwhile.
+ */
+async function accessToken(base, { stale } = {}) {
+  const usable = (saved) => saved.accessToken && saved.accessToken !== stale && saved.expiresAt - 60_000 > Date.now();
+  const read = async () => {
+    const saved = await readJson(LOGIN_FILE);
+    if (saved?.api !== base || !saved.refreshToken) throw new Error('Not signed in. Run: webly login');
+    return saved;
+  };
+  const first = await read();
+  if (usable(first)) return first.accessToken;
+  return withLoginLock(async () => {
+    const saved = await read();
+    if (usable(saved)) return saved.accessToken;
+    const tokens = await oauthToken(base, { grant_type: 'refresh_token', refresh_token: saved.refreshToken, client_id: saved.clientId })
+      .catch(() => { throw new Error('The sign-in expired or was revoked. Run: webly login'); });
+    await saveLogin({ ...saved, refreshToken: tokens.refresh_token ?? saved.refreshToken, accessToken: tokens.access_token, expiresAt: Date.now() + tokens.expires_in * 1000 });
+    return tokens.access_token;
+  });
+}
+
+/** One /v1 call as the signed-in person; retried once with a refreshed token on 401. */
+async function rest(base, method, path, { workspace, body } = {}) {
+  const call = async (token) => fetch(`${base}/v1${path.replace(/^\/v1(?=\/)/, '')}`, {
+    method, redirect: 'error', signal: AbortSignal.timeout(120_000),
+    headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(workspace ? { 'X-Webly-Workspace': workspace } : {}) },
+    body,
+  });
+  const token = await accessToken(base);
+  let response = await call(token);
+  if (response.status === 401) response = await call(await accessToken(base, { stale: token }));
+  const text = await response.text();
+  let data;
+  try { data = text ? JSON.parse(text) : null; } catch { data = { raw: text }; }
+  return { ok: response.ok, status: response.status, body: data };
+}
+
 async function main() {
   const base = new URL(process.env.WEBLY_API_URL || 'https://api.webly.ai').origin;
   const url = new URL(base);
@@ -629,11 +765,44 @@ async function main() {
     }
   }
 
+  if (command === 'login') {
+    await login(base);
+    const me = await rest(base, 'GET', '/me');
+    const spaces = await rest(base, 'GET', '/workspaces');
+    return print({ signedIn: true, workspaces: me.body?.workspaces ?? null, role: me.body?.access?.role ?? null,
+      available: (spaces.body?.items ?? []).map(w => ({ slug: w.slug, name: w.name, role: w.role, canUse: w.canUse })) });
+  }
+
+  if (command === 'api') {
+    const method = String(argument ?? '').toUpperCase();
+    if (!/^(GET|POST|PUT|PATCH|DELETE)$/.test(method) || !extra?.startsWith('/')) throw new Error('Usage: webly.mjs api <GET|POST|PUT|PATCH|DELETE> </path> [--workspace W] [--data JSON|@file]');
+    const data = option('--data'), workspace = option('--workspace');
+    const body = data === undefined ? undefined : data.startsWith('@') ? await readFile(data.slice(1), 'utf8') : data;
+    if (body !== undefined) try { JSON.parse(body); } catch { throw new Error('--data must be JSON (or @file with JSON in it)'); }
+    const result = await rest(base, method, extra, { workspace, body });
+    if (!result.ok) process.exitCode = 1;
+    return print(result.ok ? result.body : { status: result.status, ...result.body });
+  }
+
+  if (command === 'logout') {
+    const saved = await readJson(LOGIN_FILE);
+    const revoked = saved?.refreshToken
+      ? await fetch(`${saved.api}/api/auth/oauth2/revoke`, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({ token: saved.refreshToken, token_type_hint: 'refresh_token', client_id: saved.clientId }) }).then(r => r.ok, () => false)
+      : false;
+    await unlink(LOGIN_FILE).catch(() => {});
+    if (!saved) return print('Not signed in.');
+    if (!revoked) process.exitCode = 1;
+    return print(revoked ? 'Signed out; the sign-in was revoked.'
+      : 'Signed out on this machine, but Webly could not confirm the revocation. Revoke "Webly CLI" in the dashboard under API keys → Connected agents.');
+  }
+
   if (command === 'doctor') {
     // The session-start hook allows 10 s; the update check runs alongside the status call.
     const brief = argument === '--brief';
     const updateCheck = skillUpdate();
-    const report = { version: VERSION, updatedFrom: await justUpdated(), update: null, api: base, credentialFile: CREDENTIAL_FILE, credential: 'none', site: null, siteError: null, mcp: await mcpSetup(), pending: await readPending() };
+    const report = { version: VERSION, updatedFrom: await justUpdated(), update: null, api: base, credentialFile: CREDENTIAL_FILE, credential: 'none', site: null, siteError: null, mcp: await mcpSetup(), pending: await readPending(),
+      signedIn: (await readJson(LOGIN_FILE))?.api === base };
     let token = null;
     try { token = await savedCredential(base); } catch (error) { report.credential = `unusable: ${error.message}`; }
     if (token) {

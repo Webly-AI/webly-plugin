@@ -326,6 +326,9 @@ own workspace.
      `start` on Windows) and print it as a fallback. The callback completes by
      itself.
    - Other hosts: call `whoami`; the 401 starts the host's own sign-in.
+   - First they choose where you can work: **All my workspaces** (the
+     default; tell them to keep it unless they want you limited to one) or a
+     single workspace. Either way you get only what their role allows in each.
    - The consent page offers `webly:content`, `webly:edit` and `webly:admin`
      and defaults to `webly:admin`, which creating sites needs. Tell them to
      keep it unless they only want you editing existing sites (`webly:edit`).
@@ -347,6 +350,22 @@ Call `whoami` and `list_websites` first, and continue an existing site (the
 folder's linked one, if `doctor` shows a link) rather than creating a second
 one. After `create_website` for a project on disk, run `webly link
 <websiteId>` in the project folder so later sessions find it.
+
+**Workspaces.** `whoami` → `workspaces: "all"` means this connection works in
+every workspace your person belongs to. `list_workspaces` names them with their
+role in each. A site id works in any workspace, so site tools need nothing more.
+Tools that act on a whole workspace (`create_website`, `list_websites`,
+`get_billing`…) take its slug as `workspace`. If they have several, ask which
+one before creating a site, and on `400 workspace_required` ask; never guess.
+`workspaces: "one"` means the connection is limited to one workspace. If they
+need another (`list_workspaces` shows `canUse: false`), they reconnect: in
+Claude Code `/mcp` → webly → re-authenticate, and pick All my workspaces.
+
+**REST without MCP** (scripts, hosts with no MCP): `webly login` opens the
+browser to the same sign-in and workspace choice, then `webly api GET /websites
+--workspace <slug>` (or any `/v1` path, `--data` for a JSON body) calls the API
+as the person. The token stays in the helper; never ask for it or print it.
+`webly logout` revokes it.
 
 1. Framework sites (typed React, the default): `put_source_file` /
    `str_replace` (no lease needed). Static sites: `search_source` and
