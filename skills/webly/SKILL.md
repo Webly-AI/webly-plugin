@@ -437,7 +437,9 @@ using those tools for that content until the owner asks to move it. Forms
 post with `formAction('name')`, never `mailto:`, and never ask for card
 numbers, passwords, ID numbers or health details (submissions are plain text).
 If the owner wants an email per submission, turn it on with
-`set_form_notifications` (off by default).
+`set_form_notifications` (off by default). Emails go out on Hobby and Pro;
+on Free the choice is saved: give the owner `upgradeUrl`. Name the email
+field `email` so replying to an alert answers the visitor.
 Details are in llms.txt.
 
 `403` names the missing capability in `details.capability`: the grant was
