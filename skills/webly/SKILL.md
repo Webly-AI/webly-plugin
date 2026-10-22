@@ -360,6 +360,10 @@ one before creating a site, and on `400 workspace_required` ask; never guess.
 `workspaces: "one"` means the connection is limited to one workspace. If they
 need another (`list_workspaces` shows `canUse: false`), they reconnect: in
 Claude Code `/mcp` → webly → re-authenticate, and pick All my workspaces.
+When the owner asks for a team workspace photo, `set_workspace_photo` takes a
+public image `url` or the file as `base64` (PNG, JPEG, WebP or GIF, 2 MB);
+`remove_workspace_photo` clears it. A personal workspace shows the person's own
+profile photo, which they change in the dashboard.
 
 **REST without MCP** (scripts, hosts with no MCP): `webly login` opens the
 browser to the same sign-in and workspace choice, then `webly api GET /websites
