@@ -423,7 +423,10 @@ as the person. The token stays in the helper; never ask for it or print it.
 
 New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pass
 `subdomain` unless the person asks for a specific one (up to 56 characters; a taken
-one is a `409`, not a variant). On Hobby and Pro the workspace also has a namespace
+one is a `409`, not a variant). On Free each site can change its webly.site
+address once (`rename_subdomain`; Hobby and Pro unlimited), so run
+`check_subdomain` first and rename only to the exact name the person asked for.
+On Hobby and Pro the workspace also has a namespace
 and each published site answers at `urls.vanity`
 (`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
 within the namespace). Share `urls.primary`: the primary address (a custom domain
@@ -451,7 +454,11 @@ numbers, passwords, ID numbers or health details (submissions are plain text).
 If the owner wants an email per submission, turn it on with
 `set_form_notifications` (off by default). Emails go out on Hobby and Pro;
 on Free the choice is saved: give the owner `upgradeUrl`. Name the email
-field `email` so replying to an alert answers the visitor.
+field `email` so replying to an alert answers the visitor. Each workspace takes
+1,000 submissions a month on Free (10,000 Hobby, 100,000 Pro); past that they're
+held: hidden, no alerts, and deleted at the monthly reset unless the owner
+upgrades. When `list_forms` shows `quota.held`, tell the owner and give them
+`upgradeUrl`.
 Details are in llms.txt.
 
 `403` names the missing capability in `details.capability`: the grant was
@@ -493,7 +500,9 @@ returns a code their admin redeems with `accept_website_transfer`.
 
 ### Custom domains
 
-Needs a signed-in account (MCP). "Connect example.com to my site":
+Needs a signed-in account (MCP) on Hobby (5 domains) or Pro (25). On Free,
+`add_domain` is `402 domain_limit`: give the owner `details.upgradeUrl`.
+"Connect example.com to my site":
 
 1. Pick the site with `list_websites`. Never guess it from the hostname.
 2. For a bare domain, ask first:
