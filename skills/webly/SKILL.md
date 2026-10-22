@@ -297,6 +297,14 @@ own workspace.
      back to `claude mcp add --scope user`).
    - Codex: `webly connect codex`.
    - Other hosts: follow https://webly.ai/agent.md, Phase 2.
+   - **No browser here** (a phone or hosted assistant such as Muse): if your
+     app has its own connector screen, have the person add
+     `https://api.webly.ai/v1/mcp` there and sign in through it. If it only
+     takes an API key, tell them a key exists: they make one in the dashboard
+     (**Connect agent → Needs a key**) and paste it into your secure
+     credentials, never the chat (agent.md, Phase 3b). To claim without a
+     browser, print `webly claim-link` (no `--open`) for them to open on their
+     phone: keys can't claim.
    `connect` also records `pending: claim`, so the claim is finished by
    whichever session loads the tools first. Its `next` field says what to do.
 2. **Use MCP if it's already callable; otherwise claim in the browser now.**
