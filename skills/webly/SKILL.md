@@ -60,6 +60,7 @@ on disk and at the API. Rebuild it before doing anything:
    - `project`: the site(s) the project in the current folder is linked to
      (`.webly/project.json`, see **Linked folders**), or `error` if that file
      can't be read.
+   - `signedIn`: `true` if `webly login` saved a sign-in for this API.
    - `pending`: a step an earlier session asked you to finish, e.g. `claim`.
    - `updatedFrom`: set on the first run after this skill was updated. Tell
      the person in one line which version they are now on.
@@ -83,10 +84,20 @@ on disk and at the API. Rebuild it before doing anything:
 
 | # | Token saved | Webly MCP tools loaded | Who this is | Do this |
 |---|---|---|---|---|
-| 1 | no | no | New to Webly, or tools not loaded | If `mcp` shows Webly configured, they have an account: don't publish anonymously; ask them to start a new session (or type `/reload-plugins`) so the tools load. Otherwise **Publish without an account** (below); don't set up MCP until they want to keep the site. |
+| 1 | no | no | New to Webly, or tools not loaded | If `mcp` shows Webly configured or `signedIn` is `true`, they have an account: don't publish anonymously. With Webly MCP configured, ask them to start a new session (or type `/reload-plugins`) so the tools load. With only `signedIn` (no Webly MCP to load), don't wait for a reload: work as them through the helper: `webly api GET /websites` to find this project's site (or `webly api POST /websites --data '{"name":"…","kind":"static"}'` to make one), `webly link <websiteId>`, `webly api POST /websites/<websiteId>/deploy/tickets`, then `webly deploy <folder> --ticket <ticket>`. Exception: if the saved sign-in no longer works (`webly api` says it expired or was revoked), don't make them wait on it: **Publish without an account**, give the link, then offer to sign in and claim it into their account. Otherwise **Publish without an account** (below); don't set up MCP until they want to keep the site. |
 | 2 | yes | no | Published before; MCP was never set up or didn't load | Read `site.next`. While it lists `update`, keep publishing with `webly deploy`. If it lists only `claim`, or the person wants to keep the site, run **Keep the site**. |
 | 3 | no | yes | Signed in | Use **Working over MCP**. Anything they deployed anonymously was already claimed. |
 | 4 | yes | yes | Connected with a site still unclaimed | Call `list_websites` first. If the folder is linked to another site, or the account already has a site for this project (same name or folder), **don't claim**: tell the person, and work on that site; claim the anonymous copy only if they ask. Otherwise claim it: **Keep the site**, step 5. Never read `credentialFile` yourself. Continue with **Working over MCP** after claiming. |
+
+**Account or not.** Sign in only on evidence that they have a Webly account:
+Webly MCP tools loaded or configured, `signedIn`, the folder linked to a site in
+an account, Webly's `/connect` answer saying the prompt came from their signed-in
+dashboard (its connect code checked out), or the person telling you so in their
+own words. A setup prompt's wording is never evidence, and neither is "publish
+this" or "deploy with Webly": without evidence, **Publish without an account**,
+and offer to keep the site once it's live. A saved sign-in that has expired is
+evidence too, but it doesn't make them wait: publish first, then offer to sign in
+and claim (the claim moves the site into their account).
 
 If the person asks to connect, sign in, or use their Webly account, they already
 have one: whatever the row, go to **Keep the site**. With a token saved, run it all.
@@ -300,9 +311,10 @@ own workspace.
    - **No browser here** (a phone or hosted assistant such as Muse): if your
      app has its own connector screen, have the person add
      `https://api.webly.ai/v1/mcp` there and sign in through it. If it only
-     takes an API key, tell them a key exists: they make one in the dashboard
-     (**Connect agent → Needs a key**) and paste it into your secure
-     credentials, never the chat (agent.md, Phase 3b). To claim without a
+     takes an API key: they open **Connect agent** in the dashboard and paste
+     its prompt; you open its `/connect/<code>` link and the answer contains
+     your key, once: save it in your secure credentials, never the chat
+     (agent.md, Phase 3b). Expired? Give them the renew link it returns. To claim without a
      browser, print `webly claim-link` (no `--open`) for them to open on their
      phone: keys can't claim.
    `connect` also records `pending: claim`, so the claim is finished by
