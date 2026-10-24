@@ -1,0 +1,14 @@
+{
+  "name": "webly",
+  "version": "0.14.5",
+  "description": "Build, preview and publish websites on Webly from Gemini CLI: publish a site or share files at a live URL, edit it over MCP, and publish drafts you approve.",
+  "contextFileName": "GEMINI.md",
+  "mcpServers": {
+    "webly": {
+      "httpUrl": "https://api.webly.ai/v1/mcp",
+      "oauth": {
+        "enabled": true
+      }
+    }
+  }
+}

@@ -24,6 +24,7 @@ Or install it yourself:
 | Any agent, no npm | `curl -fsSL https://webly.ai/install.sh \| bash` |
 | Claude Code plugin | `/plugin marketplace add Webly-AI/webly-plugin` then `/plugin install webly@webly` |
 | Cursor plugin | Install **Webly** from the [Cursor Marketplace](https://cursor.com/marketplace) |
+| Gemini CLI extension | `gemini extensions install https://github.com/Webly-AI/webly-plugin` then `/mcp auth webly` |
 
 The skill goes into `~/.claude/skills/webly` and `~/.agents/skills/webly`, so it's
 there in every folder and every new session. The Claude Code plugin also adds the
@@ -77,6 +78,8 @@ claude plugin update webly@webly         # the Claude Code plugin
 .claude-plugin/marketplace.json   marketplace manifest
 .cursor-plugin/plugin.json        Cursor plugin manifest (skills/webly + Webly MCP server)
 assets/logo.svg                   marketplace logo
+gemini-extension.json             Gemini CLI extension (Webly MCP server, GEMINI.md, skills/)
+GEMINI.md                         Gemini CLI context
 install.sh                        installs skills/webly for Claude Code and Codex
 skills/webly/                     the skill, for npx skills and install.sh
 plugins/webly/
