@@ -1,0 +1,27 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "webly",
+  "version": "0.14.5",
+  "description": "Publish a website, or share files and folders, at a live URL from Hermes Agent, then claim, edit and publish it through the hosted Webly MCP server.",
+  "author": {
+    "name": "Webly",
+    "email": "contact@webly.ai",
+    "url": "https://webly.ai"
+  },
+  "homepage": "https://webly.ai",
+  "repository": "https://github.com/Webly-AI/webly-plugin/tree/main/hermes",
+  "license": "Apache-2.0",
+  "keywords": ["hosting", "mcp", "publish", "website", "share"],
+  "extensions": {
+    "com.nousresearch.hermes": {
+      "config_schema": {
+        "api_key": {
+          "type": "secret",
+          "env": "WEBLY_API_KEY",
+          "label": "Webly API key",
+          "description": "Optional. A wb_ key from the Webly dashboard (Settings, Agents & keys). Leave empty to sign in with OAuth instead (see the README)."
+        }
+      }
+    }
+  }
+}
