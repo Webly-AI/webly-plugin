@@ -225,7 +225,7 @@ export function ticketClaims(ticket) {
 export function mirrorVersion(dir, websiteId, runner = run) {
   const remotes = runner('git', ['remote', '-v'], dir);
   if (!remotes.ok) return null;
-  const name = remotes.output.split('\n').map((l) => l.split(/\s+/)).find(([, url]) => new RegExp(`/${websiteId}(\\.git)?$`).test(url ?? ''))?.[0];
+  const name = remotes.output.split('\n').map((l) => l.split(/\s+/)).find(([, url = '']) => url.endsWith(`/${websiteId}`) || url.endsWith(`/${websiteId}.git`))?.[0];
   if (!name) return null;
   // Only history this checkout shares with the site's mirror: another branch's trailers aren't this site's versions.
   const shared = runner('git', ['merge-base', 'HEAD', `refs/remotes/${name}/main`], dir);
