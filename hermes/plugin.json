@@ -11,7 +11,13 @@
   "homepage": "https://webly.ai",
   "repository": "https://github.com/Webly-AI/webly-plugin/tree/main/hermes",
   "license": "Apache-2.0",
-  "keywords": ["hosting", "mcp", "publish", "website", "share"],
+  "keywords": [
+    "hosting",
+    "mcp",
+    "publish",
+    "website",
+    "share"
+  ],
   "extensions": {
     "com.nousresearch.hermes": {
       "config_schema": {
@@ -20,6 +26,11 @@
           "env": "WEBLY_API_KEY",
           "label": "Webly API key",
           "description": "Optional. A wb_ key from the Webly dashboard (Settings, Agents & keys). Leave empty to sign in with OAuth instead (see the README)."
+        }
+      },
+      "servers": {
+        "webly": {
+          "trust": "untrusted"
         }
       }
     }
