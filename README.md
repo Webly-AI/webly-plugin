@@ -23,10 +23,11 @@ Or install it yourself:
 | Any agent, with npm | `npx skills add Webly-AI/webly-plugin --skill webly -g` |
 | Any agent, no npm | `curl -fsSL https://webly.ai/install.sh \| bash` |
 | Claude Code plugin | `/plugin marketplace add Webly-AI/webly-plugin` then `/plugin install webly@webly` |
+| Cursor plugin | Install **Webly** from the [Cursor Marketplace](https://cursor.com/marketplace) |
 
 The skill goes into `~/.claude/skills/webly` and `~/.agents/skills/webly`, so it's
 there in every folder and every new session. The Claude Code plugin also adds the
-Webly MCP server and a session-start hook. The helper needs Node 18+.
+Webly MCP server and a session-start hook; the Cursor plugin adds the skill and the MCP server. The helper needs Node 18+.
 
 ## How it works
 
@@ -74,6 +75,8 @@ claude plugin update webly@webly         # the Claude Code plugin
 
 ```
 .claude-plugin/marketplace.json   marketplace manifest
+.cursor-plugin/plugin.json        Cursor plugin manifest (skills/webly + Webly MCP server)
+assets/logo.svg                   marketplace logo
 install.sh                        installs skills/webly for Claude Code and Codex
 skills/webly/                     the skill, for npx skills and install.sh
 plugins/webly/
