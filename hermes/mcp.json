@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/mcp.schema.json",
+  "mcpServers": {
+    "webly": {
+      "type": "streamable-http",
+      "url": "https://api.webly.ai/v1/mcp",
+      "headers": {
+        "Authorization": "Bearer ${WEBLY_API_KEY}"
+      }
+    }
+  }
+}
