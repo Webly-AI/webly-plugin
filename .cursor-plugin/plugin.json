@@ -4,12 +4,19 @@
   "description": "Build, preview and publish websites on Webly from Cursor. Your agent writes typed React source, Webly builds it through a quality gate into a private draft, and you approve what goes live.",
   "author": {
     "name": "Webly",
-    "url": "https://webly.ai"
+    "email": "contact@webly.ai"
   },
   "homepage": "https://webly.ai",
   "repository": "https://github.com/Webly-AI/webly-plugin",
   "license": "Apache-2.0",
-  "keywords": ["webly", "website", "hosting", "deploy", "publish", "react"],
+  "keywords": [
+    "webly",
+    "website",
+    "hosting",
+    "deploy",
+    "publish",
+    "react"
+  ],
   "logo": "./assets/logo.svg",
   "skills": "./skills/",
   "mcpServers": {
