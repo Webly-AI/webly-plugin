@@ -10,12 +10,11 @@ import { basename, dirname, extname, join, relative, resolve, sep } from 'node:p
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { createServer } from 'node:http';
 import { resolve4, resolveCname } from 'node:dns/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
 export const VERSION = '0.14.5';
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
-const LATEST_URL = null; // Hermes catalog build: no update check. Updates arrive only as a reviewed catalog pin bump (hermes plugins update webly).
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
 // Where releases before 0.4.0 saved the token; moved to CREDENTIAL_FILE on first read.
 const LEGACY_FILE = process.env.WEBLY_STATE_FILE ? null : join(homedir(), '.webly', 'anonymous-credential');
@@ -462,18 +461,8 @@ const newer = (a, b) => {
   return false;
 };
 
-/** A newer published skill, with the command that updates this install, or null. Never fails. */
-export async function skillUpdate() {
-  if (!LATEST_URL) return null;
-  try {
-    const latest = (await (await fetch(LATEST_URL, { signal: AbortSignal.timeout(3000) })).json()).version;
-    if (!newer(latest, VERSION)) return null;
-    const plugin = realpathSync(fileURLToPath(import.meta.url)).includes(`${sep}plugins${sep}`);
-    return { installed: VERSION, latest, command: plugin
-      ? 'claude plugin update webly@webly (then restart Claude Code or run /reload-plugins)'
-      : 'npx skills update webly -g   (no npm: curl -fsSL https://webly.ai/install.sh | bash)' };
-  } catch { return null; }
-}
+/** Hermes catalog build: no update check. Updates arrive only as a reviewed catalog pin bump (hermes plugins update webly). */
+export async function skillUpdate() { return null; }
 
 /** The version this replaced if it is the first run since an update, else null. Records VERSION. Never fails. */
 export async function justUpdated(file = SEEN_FILE) {

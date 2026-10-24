@@ -64,10 +64,8 @@ on disk and at the API. Rebuild it before doing anything:
    - `pending`: a step an earlier session asked you to finish, e.g. `claim`.
    - `updatedFrom`: set on the first run after this skill was updated. Tell
      the person in one line which version they are now on.
-   - `update`: set when a newer version of this skill is published. Run its
-     `command` (it matches how this copy was installed), tell the person in one
-     line, then carry on with the task using this copy. The new one loads next
-     session.
+   - `update`: never set in the Hermes catalog copy; updates arrive as a reviewed
+     catalog pin bump (`hermes plugins update webly`).
 2. Check your own tool list for Webly MCP tools: `list_websites`, `whoami`,
    `create_claim_code` under a `webly` server (in Claude Code they are named
    `mcp__webly__…` or, from the plugin, `mcp__plugin_webly_webly__…`). A server
@@ -307,6 +305,10 @@ own workspace.
    - Claude Code: `webly connect claude` (installs the Webly plugin, or falls
      back to `claude mcp add --scope user`).
    - Codex: `webly connect codex`.
+   - Hermes: this plugin already adds the `webly` server. Ask the person to set
+     the plugin's `WEBLY_API_KEY` setting (a `wb_` key from the dashboard), or
+     run `hermes mcp add webly --url https://api.webly.ai/v1/mcp --auth oauth`
+     then `hermes mcp login webly`.
    - Other hosts: follow https://webly.ai/agent.md, Phase 2.
    - **No browser here** (a phone or hosted assistant such as Muse): if your
      app has its own connector screen, have the person add
