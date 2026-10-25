@@ -13,7 +13,9 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.14.5';
+export const VERSION = '0.14.6';
+// Lets the API tell helper traffic from other REST clients in its product analytics.
+const UA = { 'User-Agent': `webly-helper/${VERSION}` };
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
 const LATEST_URL = process.env.WEBLY_VERSION_URL ?? 'https://raw.githubusercontent.com/Webly-AI/webly-plugin/main/plugins/webly/.claude-plugin/plugin.json';
 const CREDENTIAL_FILE = process.env.WEBLY_STATE_FILE || join(homedir(), '.webly', 'state.json');
@@ -301,7 +303,7 @@ export async function ticketForm(target, fields = {}) {
 async function uploadLarge(base, ticket, large) {
   const response = await fetch(`${base}/public/v1/deploys/uploads`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
-    headers: { Authorization: `Bearer ${ticket}`, 'Content-Type': 'application/json' },
+    headers: { ...UA, Authorization: `Bearer ${ticket}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ files: large.map(({ path, size, sha256, partSha256 }) => ({ path, size, sha256, ...(partSha256 && { partSha256 }) })) }),
   });
   const result = await response.json().catch(() => ({}));
@@ -486,7 +488,7 @@ export async function justUpdated(file = SEEN_FILE) {
 
 async function api(base, path, token, { timeout = 30_000, ...init } = {}) {
   const response = await fetch(`${base}/public/v1/anonymous${path}`, {
-    ...init, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    ...init, redirect: 'error', signal: AbortSignal.timeout(timeout), headers: { ...UA, Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
   });
   return { ok: response.ok, status: response.status, body: await response.json().catch(() => ({})) };
 }
@@ -557,7 +559,7 @@ async function ticketDeploy(base, { command, argument, root, entryName, entry, t
   if (uploaded.length) form.append('uploaded', JSON.stringify(uploaded));
   const response = await fetch(`${base}/public/v1/deploys`, {
     method: 'POST', redirect: 'error', signal: AbortSignal.timeout(120_000),
-    headers: { Authorization: `Bearer ${deployTicket}` }, body: form,
+    headers: { ...UA, Authorization: `Bearer ${deployTicket}` }, body: form,
   });
   const result = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -706,7 +708,7 @@ async function accessToken(base, { stale } = {}) {
 async function rest(base, method, path, { workspace, body } = {}) {
   const call = async (token) => fetch(`${base}/v1${path.replace(/^\/v1(?=\/)/, '')}`, {
     method, redirect: 'error', signal: AbortSignal.timeout(120_000),
-    headers: { Authorization: `Bearer ${token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(workspace ? { 'X-Webly-Workspace': workspace } : {}) },
+    headers: { ...UA, Authorization: `Bearer ${token}`, ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(workspace ? { 'X-Webly-Workspace': workspace } : {}) },
     body,
   });
   const token = await accessToken(base);
@@ -906,7 +908,7 @@ async function main() {
     if (!/^wc_[\w.-]+$/.test(argument ?? '')) throw new Error('Usage: webly.mjs claim <code>  (get the code from the create_claim_code MCP tool)');
     const response = await fetch(`${base}/api/anonymous/claim`, {
       method: 'POST', redirect: 'error', signal: AbortSignal.timeout(30_000),
-      headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token, code: argument }),
+      headers: { ...UA, 'Content-Type': 'application/json' }, body: JSON.stringify({ token, code: argument }),
     });
     const result = await response.json().catch(() => ({}));
     if (!response.ok) {

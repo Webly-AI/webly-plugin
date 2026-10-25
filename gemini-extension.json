@@ -1,6 +1,6 @@
 {
   "name": "webly",
-  "version": "0.14.5",
+  "version": "0.14.6",
   "description": "Build, preview and publish websites on Webly from Gemini CLI: publish a site or share files at a live URL, edit it over MCP, and publish drafts you approve.",
   "contextFileName": "GEMINI.md",
   "mcpServers": {
