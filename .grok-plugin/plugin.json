@@ -1,0 +1,25 @@
+{
+  "name": "webly",
+  "version": "0.14.6",
+  "description": "Publish a website, or share files and folders, at a live URL in seconds with no account. The person can claim it, edit it over MCP, and publish drafts they approve. Supports custom domains and version history.",
+  "author": {
+    "name": "Webly",
+    "email": "contact@webly.ai",
+    "url": "https://webly.ai"
+  },
+  "homepage": "https://webly.ai",
+  "repository": "https://github.com/Webly-AI/webly-plugin",
+  "license": "Apache-2.0",
+  "keywords": [
+    "webly",
+    "webly.ai",
+    "webly.site",
+    "publish to webly"
+  ],
+  "domains": [
+    "webly.ai",
+    "webly.site"
+  ],
+  "mcpServers": "./.mcp.json",
+  "skills": "./skills/"
+}
