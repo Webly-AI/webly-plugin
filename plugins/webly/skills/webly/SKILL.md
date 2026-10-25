@@ -220,7 +220,14 @@ else downloads. Tell the person when the links stop working (`expiresAt`).
 
 Managing shared files over MCP (the dashboard's Files page does the same):
 
-- `list_objects` lists files with their `folder` and `folderLabel`.
+- `list_objects` lists files with their `folder`, `folderLabel` and `scan`.
+  Files go live at once and Webly scans them shortly after. `scan.status`
+  `flagged` (the file's `status` is `quarantined`) means it was blocked as
+  malware or a program named like a document: its link stops working and it is
+  deleted at `scan.deletesAt`. Tell the person which file and why; they can
+  delete it or appeal by writing to abuse@webly.ai before that date. A `clean`
+  file with reason `executable:*` is an honestly named program: mention it when
+  sharing.
 - `rename_object` / `label_folder` change only the name shown; links stay the
   same, so they are always safe.
 - `move_object` moves a file into another folder (or, with no folder, gives it
