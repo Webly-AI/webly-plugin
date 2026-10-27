@@ -549,7 +549,7 @@ Needs a signed-in account (MCP) on Hobby (5 domains) or Pro (25). On Free,
    returned**, as a Type / Name / Value table: the CNAME **and** the
    `_acme-challenge` TXT records. The TXT issues the HTTPS (SSL) certificate
    and is always needed; without it HTTPS can take hours. If it isn't in
-   `dns.records` yet, call `get_domain` a few seconds later and give it then.
+   `dns.records` yet, call `verify_domain` a few seconds later and give it then.
    For a www domain, also give the `apexForward` forwarding rule. Provider tips:
    - Type only the Name shown (`www`, or `@` for the root). GoDaddy and
      Namecheap add the domain themselves.
