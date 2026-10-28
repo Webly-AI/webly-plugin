@@ -258,6 +258,10 @@ Managing shared files over MCP (the dashboard's Files page does the same):
   `resume_object_upload` returns what already landed and URLs for only the
   missing parts; run those, then `finalize_object_upload`. Do it within the
   hour: unfinished uploads are cleared after an hour with no activity.
+- Finalizing a big file (hundreds of MB) can take a minute or more. If
+  `finalize_object_upload` times out, or a file comes back with
+  `finalizing: true`, call it again every few seconds until it's ready. Never
+  cancel or re-upload a file that is finalizing.
 - `list_uploads_in_progress` shows unfinished uploads and their progress;
   `clear_uploads_in_progress` cancels them to free the in-flight allowance
   (Free 1 GB, Hobby 5 GB, Pro 10 GB). Ask first.

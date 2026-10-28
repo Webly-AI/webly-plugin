@@ -13,7 +13,7 @@ import { resolve4, resolveCname } from 'node:dns/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 /** Skill release. scripts/sync-plugin.sh stamps this into the plugin manifests; bump it to ship. */
-export const VERSION = '0.14.10';
+export const VERSION = '0.14.11';
 // Lets the API tell helper traffic from other REST clients in its product analytics.
 const UA = { 'User-Agent': `webly-helper/${VERSION}` };
 // The published plugin manifest is what `npx skills`, install.sh and /plugin install all read from.
@@ -1155,6 +1155,30 @@ async function zipToTemp(files, name) {
   return { path, name, byteSize: (await stat(path)).size, mimeType: 'application/zip', archive: true };
 }
 
+/**
+ * Finalize, asking again while files are still being moved into place (`finalizing: true`) or the
+ * call times out or the server is briefly unavailable: finalize is idempotent, and a big batch's
+ * copies can take minutes.
+ */
+async function finalizeAll(base, token, site, ids) {
+  const deadline = Date.now() + 10 * 60_000;
+  const ready = new Map();
+  for (let pending = ids; ;) {
+    const r = await api(base, `/sites/${encodeURIComponent(site.id)}/objects/finalize`, token, { method: 'POST', body: JSON.stringify({ ids: pending }), timeout: 5 * 60_000 })
+      .catch(() => ({ ok: false, status: 0, body: {} }));
+    if (!r.ok && r.status !== 0 && r.status < 500) return r;
+    if (r.ok) {
+      for (const f of r.body.files) if (!f.finalizing) ready.set(f.id, f);
+      pending = r.body.files.filter((f) => f.finalizing).map((f) => f.id);
+    }
+    if (!pending.length || Date.now() > deadline) {
+      if (!r.ok && !ready.size) return r;
+      return { ok: true, status: 200, body: { files: ids.map((id) => ready.get(id) ?? { id, ok: false, finalizing: true, error: 'Still finalizing: it will be ready shortly' }) } };
+    }
+    await new Promise((res) => setTimeout(res, 3000));
+  }
+}
+
 /** Begin, PUT and finalize one batch of up to 1000 files; what doesn't finish is cancelled. */
 async function uploadBatch(base, token, site, folder, files, errors, failed) {
   const begun = await api(base, `/sites/${encodeURIComponent(site.id)}/objects/uploads`, token, { method: 'POST', body: JSON.stringify({ folder, files: files.map(({ name, byteSize, mimeType, archive }) => ({ name, byteSize, mimeType, archive })) }) });
@@ -1178,7 +1202,7 @@ async function uploadBatch(base, token, site, folder, files, errors, failed) {
       delete job.headers['Content-Length'];
       const body = await bytesOf(job);
       let response;
-      for (let attempt = 1; attempt <= 4; attempt++) {
+      for (let attempt = 1; attempt <= 6; attempt++) {
         response = await fetch(job.url, { method: 'PUT', headers: job.headers, body, signal: AbortSignal.timeout(15 * 60_000) }).catch((e) => ({ ok: false, status: e.message }));
         if (response.ok || (response.status >= 400 && response.status < 500)) break;
         await new Promise((r) => setTimeout(r, 1000 * 2 ** (attempt - 1)));
@@ -1186,9 +1210,10 @@ async function uploadBatch(base, token, site, folder, files, errors, failed) {
       if (!response.ok) errors.push(`${job.name}: upload failed (${response.status})`);
     }
   }));
-  const finalized = await api(base, `/sites/${encodeURIComponent(site.id)}/objects/finalize`, token, { method: 'POST', body: JSON.stringify({ ids: begun.body.files.map((f) => f.id) }) });
-  // Cancel what didn't finish, so a retry isn't blocked by the abandoned upload.
-  const done = new Set(finalized.ok ? finalized.body.files.filter((f) => f.ok).map((f) => f.id) : []);
+  const finalized = await finalizeAll(base, token, site, begun.body.files.map((f) => f.id));
+  // Cancel what didn't finish, so a retry isn't blocked by the abandoned upload. A file still
+  // finalizing is about to be ready: cancelling it would throw away a finished upload.
+  const done = new Set(finalized.ok ? finalized.body.files.filter((f) => f.ok || f.finalizing).map((f) => f.id) : []);
   for (const f of begun.body.files) if (!done.has(f.id)) await api(base, `/sites/${encodeURIComponent(site.id)}/objects/${encodeURIComponent(f.id)}`, token, { method: 'DELETE' }).catch(() => {});
   if (!finalized.ok) await failed(finalized.body, `Finalize failed (${finalized.status})`);
   return { begun: begun.body, files: finalized.body.files };
