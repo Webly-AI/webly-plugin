@@ -500,7 +500,7 @@ Details are in llms.txt.
 narrower than the task, so tell them which access level covers it. `401` /
 `invalid_token`: call a Webly tool again to re-trigger sign-in; don't start a
 second attempt while one is waiting. Other people and agents may edit the
-same site at once, and people may edit text in the dashboard (History shows
+same site at once, and people may edit text and styles in the dashboard (History shows
 them as Editor). Prefer `str_replace` for small edits. Send `baseVersion`
 (the `version` your read returned) with `put_source_file` /
 `delete_source_file`: their edits to other lines are merged with yours;
