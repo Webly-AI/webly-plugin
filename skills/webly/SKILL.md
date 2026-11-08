@@ -522,6 +522,13 @@ history (one commit per version). Its token lasts one minute, so run its
 `WEBLY_GIT_TOKEN=<token> <clone>`, never with the token in the URL. Check `headVersion` with `get_website`
 before asking again. Never `git push`; write through the tools.
 
+### Turn a static site into a React site (or back)
+
+Create a new site of the other kind and port the pages yourself: components,
+and React state for what scripts did (or plain HTML and small scripts the
+other way). Leave the original untouched until your person is happy with the
+new one.
+
 ### Duplicate or move a site
 
 Hobby and Pro, in both workspaces (`402 plan_required` otherwise: give the
