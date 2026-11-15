@@ -440,18 +440,18 @@ New sites get a short generated address (`zen-wreath-y76r.webly.site`); don't pa
 one is a `409`, not a variant). On Free each site can change its webly.site
 address once (`rename_subdomain`; Hobby and Pro unlimited), so run
 `check_subdomain` first and rename only to the exact name the person asked for.
-On Hobby and Pro the workspace also has a namespace
-and each published site answers at `urls.vanity`
+On Hobby and Pro the workspace also has a handle
+and each published site answers at its workspace address, `urls.workspace`
 (`https://fall-out-boy.kev.webly.site`, the label from the site's name, unique only
-within the namespace). Share `urls.primary`: the primary address (a custom domain
-when one is live, else the vanity, else the flat address, unless the owner chose a
+within the workspace). Share `urls.primary`: the primary address (a custom domain
+when one is live, else the workspace address, else the flat address, unless the owner chose a
 webly.site address as primary); `urls.all` lists every
-address the site answers at. `rename_vanity`
-changes a site's label; `get_namespace` / `check_namespace` / `rename_namespace`
-handle the namespace. Renames are scarce (Hobby 5, Pro 10, lifetime), so rename
-only to the exact name the person asked for, and tell them old vanity addresses
+address the site answers at. `rename_workspace_label`
+changes a site's label; `get_handle` / `check_handle` / `rename_handle`
+manage the handle. Renames are scarce (Hobby 5, Pro 10, lifetime), so rename
+only to the exact name the person asked for, and tell them old workspace addresses
 stop working. The new addresses need about a minute for HTTPS: check
-`get_namespace` until `certificate` is `active`, then tell them they're live.
+`get_handle` until `certificate` is `active`, then tell them they're live.
 On `402`, give them `details.upgradeUrl`.
 
 A team workspace has one owner (`whoami` → `owner`). Ownership of the workspace
