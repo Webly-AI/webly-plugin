@@ -52,7 +52,7 @@
               "description": "Create and publish a new static site",
               "prompt": "Make a one-page site for a bakery called Rise with its opening hours (Tue-Sun 7am-3pm) and publish it on Webly.",
               "tools_triggered": "create_website, deploy_files, publish_website",
-              "expected_behavior": "Creates a static site, writes an index.html with the bakery name and hours, publishes it and replies with the live https://...webly.site URL."
+              "expected_behavior": "Creates a static site, writes an index.html with the bakery name and hours, shows the private draft preview URL and asks before publishing; after the user confirms, publishes it and replies with the live https://...webly.site URL."
             },
             {
               "description": "List the account's websites",
