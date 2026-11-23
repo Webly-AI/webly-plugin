@@ -10,7 +10,17 @@
   },
   "homepage": "https://webly.ai",
   "privacyPolicyUrl": "https://webly.ai/legal/privacy",
+  "termsOfServiceUrl": "https://webly.ai/legal/terms",
+  "documentationUrl": "https://docs.webly.ai",
+  "supportUrl": "https://github.com/Webly-AI/webly-plugin/issues",
   "repository": "https://github.com/Webly-AI/webly-plugin",
   "license": "Apache-2.0",
-  "keywords": ["webly", "website", "hosting", "deploy", "publish", "react"]
+  "keywords": [
+    "webly",
+    "website",
+    "hosting",
+    "deploy",
+    "publish",
+    "react"
+  ]
 }
