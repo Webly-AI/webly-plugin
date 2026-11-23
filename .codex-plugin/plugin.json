@@ -34,9 +34,12 @@
     "privacyPolicyURL": "https://webly.ai/legal/privacy",
     "termsOfServiceURL": "https://webly.ai/legal/terms",
     "defaultPrompt": [
-      "Publish this folder on Webly and give me the link"
+      "Publish this folder on Webly and give me the link",
+      "Make a one-page site for my bakery and put it online",
+      "Show me a preview of my Webly site before it goes live"
     ],
     "composerIcon": "./assets/logo.svg",
-    "logo": "./assets/logo.svg"
+    "logo": "./assets/logo.svg",
+    "supportURL": "https://github.com/Webly-AI/webly-plugin/issues"
   }
 }
