@@ -8,6 +8,7 @@
     "url": "https://webly.ai"
   },
   "homepage": "https://webly.ai",
+  "privacyPolicyUrl": "https://webly.ai/legal/privacy",
   "repository": "https://github.com/Webly-AI/webly-plugin",
   "license": "Apache-2.0",
   "keywords": [
