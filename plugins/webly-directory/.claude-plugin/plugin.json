@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "webly",
+  "version": "0.15.5",
+  "description": "Publish websites and share files at a live URL in seconds. Claude builds the site, edits pages and content over the Webly MCP server (OAuth, no API key), shows you a private draft, and publishes only the versions you approve. Version history, rollback, branches, custom domains, forms and analytics.",
+  "author": {
+    "name": "Webly",
+    "url": "https://webly.ai"
+  },
+  "homepage": "https://webly.ai",
+  "privacyPolicyUrl": "https://webly.ai/legal/privacy",
+  "repository": "https://github.com/Webly-AI/webly-plugin",
+  "license": "Apache-2.0",
+  "keywords": ["webly", "website", "hosting", "deploy", "publish", "react"]
+}
