@@ -1,7 +1,7 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
   "name": "webly",
-  "version": "0.15.5",
+  "version": "0.15.8",
   "description": "Publish a website, or share files and folders, at a live URL in seconds, no account needed. The person can then sign in to claim it, keep editing it over the Webly MCP server (OAuth, no API key) and publish the drafts they approve. Bundles the webly skill and helper, with custom domains, version history and rollback.",
   "author": {
     "name": "Webly",
